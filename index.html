@@ -23,17 +23,17 @@ main{max-width:1180px;margin:0 auto;padding:28px 20px 60px}.hero{display:flex;ju
 </style>
 
 <style>
-/* Display-only alignment to the current moker.cc page; no application script or data logic is changed. */
-.sampling-field .field-hint{display:block;margin-top:5px;font-size:12px;line-height:1.4;color:var(--muted)}
-.watchlist-panel{padding:15px}
-@media(min-width:861px){.sampling-field .field-hint{min-height:55px}.watchlist-panel{min-height:110px;padding:28px 20px}}
-.watchlist-fold>summary{display:grid;grid-template-columns:auto auto 1fr;grid-template-rows:auto auto;align-items:center;justify-content:start;gap:4px 5px;cursor:pointer;list-style:none}
+/* Display-only parity: keep the hosted controls, values and behavior intact. */
+.thsdk-note{margin:10px 0 0}
+.sampling-field .field-hint{display:block;margin-top:4px;font-size:12px;line-height:1.4;color:var(--muted)}
+.watchlist-panel{padding:20px}
+.watchlist-fold>summary{display:grid;grid-template-columns:max-content minmax(0,1fr);grid-template-rows:auto auto;align-items:center;justify-content:start;gap:4px 6px;min-width:0;cursor:pointer;list-style:none}
 .watchlist-fold>summary::-webkit-details-marker{display:none}
-.watchlist-fold>summary h2{grid-column:1;grid-row:1;font-size:18px;line-height:1.4;margin:0}
+.watchlist-fold>summary h2{grid-column:1;grid-row:1;font-size:18px;line-height:1.4;margin:0;white-space:nowrap}
 .watchlist-fold>summary::after{content:"⌄";grid-column:2;grid-row:1;color:var(--muted);font-size:20px;line-height:1}
 .watchlist-fold[open]>summary::after{content:"⌃"}
 .watchlist-fold>summary:focus-visible{outline:2px solid var(--blue);outline-offset:4px;border-radius:4px}
-.watchlist-fold>summary .watchlist-status{grid-column:1/-1;grid-row:2;display:block;margin:0;font-size:12px;line-height:1.5;overflow-wrap:anywhere}
+.watchlist-fold>summary .watchlist-status{grid-column:1/-1;grid-row:2;display:block;min-width:0;margin:0;color:var(--muted);font-size:12px;line-height:1.5;overflow-wrap:anywhere}
 .watchlist-fold>summary .watchlist-status:empty{display:none}
 .watchlist-fold-content{margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
 .watchlist-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 10px}
@@ -47,16 +47,25 @@ main{max-width:1180px;margin:0 auto;padding:28px 20px 60px}.hero{display:flex;ju
 table thead th{position:-webkit-sticky;position:sticky;top:0;z-index:2;background:#f7f9fc;box-shadow:0 1px 0 var(--line)}
 .table-scroll{width:100%;max-width:100%}
 #bookFlowPanel{margin:14px 0 10px!important;padding:0!important;border:0!important;border-radius:0!important;background:transparent!important;line-height:1.7}
+#bookFlowPanel::before{content:"五档加单与撤单";display:block;margin:0 0 8px;font-size:18px;font-weight:600;color:var(--ink)}
 #bookFlowPanel>div[style*="display:flex"]{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:14px!important;margin:12px 0!important}
-#bookFlowPanel>div[style*="display:flex"]>div{min-width:0!important;padding:16px;border:1px solid var(--line);border-radius:10px;background:var(--card)}
-#bookFlowPanel>div[style*="display:flex"]>div>strong{font-size:15px}
-#bookThreeSecondPanel,#bookLedger,#bookAuditPanel{background:var(--card)!important;border-color:var(--line)!important;border-radius:10px!important}
+#bookFlowPanel>div[style*="display:flex"]>div{min-width:0!important;padding:16px;border:1px solid var(--line);border-radius:10px;background:var(--card);overflow-wrap:anywhere}
+#bookFlowPanel>div[style*="display:flex"]>div>strong{font-size:15px;line-height:1.6}
+#bookThreeSecondPanel,#bookLedger,#bookAuditPanel{min-width:0;max-width:100%;margin:14px 0!important;padding:16px!important;border:1px solid var(--line)!important;border-radius:10px!important;background:var(--card)!important;line-height:1.7}
+#bookThreeSecondPanel>h3,#bookLedger>h3{margin:0 0 10px!important;font-size:16px}
+#bookThreeSecondPanel>div[style*="display:flex"]{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:14px!important;margin:12px 0!important}
+#bookThreeSecondPanel>div[style*="display:flex"]>div{min-width:0!important;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--card);overflow-wrap:anywhere}
+#bookLedger .table-wrap,#bookThreeSecondPanel .table-wrap,#bookAuditPanel .table-wrap{width:100%;max-width:100%}
+#bookRecorder{min-width:0;max-width:100%}
 @media(max-width:640px){
-  .watchlist-panel{padding:22px 15px 8px}
+  .watchlist-panel{padding:15px}
   .watchlist-actions{display:grid;grid-template-columns:1fr;gap:7px}
   .watchlist-actions>*{width:100%}
   #bookFlowPanel>div[style*="display:flex"]{grid-template-columns:minmax(0,1fr)!important;gap:10px!important}
   #bookFlowPanel>div[style*="display:flex"]>div{padding:14px}
+  #bookThreeSecondPanel,#bookLedger,#bookAuditPanel{padding:14px!important}
+  #bookThreeSecondPanel>div[style*="display:flex"]{grid-template-columns:minmax(0,1fr)!important;gap:10px!important}
+  #bookThreeSecondPanel>div[style*="display:flex"]>div{padding:12px}
 }
 </style>
 </head>
