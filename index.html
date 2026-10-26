@@ -22,7 +22,7 @@ main{max-width:1180px;margin:0 auto;padding:28px 20px 60px}.hero{display:flex;ju
 .thsdk-detail-grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:18px;align-items:stretch}.thsdk-trades{position:relative;min-width:0;min-height:0}.thsdk-trades .thsdk-scroll{position:absolute;inset:0;max-height:none}.depth-box{border:1px solid var(--line);border-radius:10px;overflow:hidden}.depth-box h3{font-size:16px;margin:0;padding:12px;background:#f7f9fc}.depth-table{min-width:0;table-layout:fixed}.depth-table th,.depth-table td{padding:7px 10px}.depth-table tr.depth-divider td{border-top:2px solid #cfd8e5}.depth-level-sell{color:var(--green)}.depth-level-buy{color:var(--red)}.depth-status{padding:10px;margin:0;font-size:12px;color:var(--muted)}@media(max-width:780px){.thsdk-detail-grid{grid-template-columns:1fr}.thsdk-trades{position:static}.thsdk-trades .thsdk-scroll{position:static;max-height:420px}.depth-box{max-width:460px;width:100%}}
 </style>
 
-<link rel="stylesheet" href="./ui-parity.css?v=20261026-structure3">
+<link rel="stylesheet" href="./ui-parity.css?v=20261026-structure5">
 </head>
 <body>
 <main>
@@ -1217,9 +1217,27 @@ const bookRecorder = (() => {
     const volumeText=snapshot?`共同成交量：${fmtLots(volume)} 手（观察期全部去重成交，含五档内外，每笔只计一次）`:'共同成交量：等待成交明细更新结算；盘口每次变化均已独立记录。';
     $('bookThreeSource').textContent=volumeText;$('bookFlowVolume').textContent=volumeText;
     for(const [side,suffix,label]of[['bid','Bid','买盘'],['ask','Ask','卖盘']]){const m=snapshot?.[side];$('book'+suffix+'Addition').textContent=`${label}累计加单率：${fmtTradeRate(m?.addition_rate_pct,m?.denominator_trade_shares)}`;$('book'+suffix+'AdditionDetail').textContent=m?`加单 ${fmtLots(m.added_shares)} 手；撤单 ${fmtLots(m.cancellation_shares)} 手；观察减少 ${fmtLots(m.observed_reduction_shares)} 手；净加单 ${fmtLots(m.net_change_shares)} 手；净加单率 ${fmtTradeRate(m.net_addition_rate_pct,m.denominator_trade_shares)}；共同成交分母 ${fmtLots(m.denominator_trade_shares)} 手。`:'';}
-    $('bookThreeSummary').textContent=`已结算 ${entries.length} 次成交明细更新，显示最近60次；待下次成交更新结算 ${result?.pending_intervals||0} 次盘口比较。每次结算全部五档；逐档数量、净加单率和每次增减可展开查看并完整导出。`;
-    const visible=[...entries].reverse().slice(0,60),key=JSON.stringify([sessions.get(state.code)?.id,visible]);if(!clear&&key===threeRenderKey)return;threeRenderKey=key;
-    $('bookThreeRows').replaceChildren(...visible.map(w=>{const tr=document.createElement('tr'),clock=t=>tickSourceTime(t).split(' ').at(-1),values=[`${clock(w.start)} → ${clock(w.end)}`,fmtLots(w.source_trade_volume_shares)];for(const side of['bid','ask']){const m=w[side];values.push(fmtLots(m.added_shares),fmtLots(m.cancellation_shares),fmtLots(m.net_change_shares),fmtTradeRate(m.addition_rate_pct,m.denominator_trade_shares),fmtTradeRate(m.reduction_rate_pct,m.denominator_trade_shares),fmtTradeRate(m.net_addition_rate_pct,m.denominator_trade_shares));}values.push(`同价变化 ${w.visibility_counts?.in_five_same_price||0} 项；进入 ${w.visibility_counts?.entered_five||0} 项；移出 ${w.visibility_counts?.left_five||0} 项`);values.push(`成交更新结算；${w.sample_pairs}次盘口比较；无匹配成交的档位按0${w.ambiguous_trade_shares?'；有归侧不明成交，仅计分母':''}`);for(const value of values){const td=document.createElement('td');td.textContent=String(value);tr.appendChild(td);}const td=document.createElement('td'),details=document.createElement('details'),summary=document.createElement('summary'),pre=document.createElement('pre');summary.textContent='逐档增减与净加单率';pre.style.cssText='white-space:pre-wrap;font-size:11px;max-width:420px';pre.textContent=(w.levels||[]).map(z=>`${z.side==='bid'?'买':'卖'} ${z.price}：加 ${fmtLots(z.added_shares)}；减 ${fmtLots(z.observed_reduction_shares)}；成交 ${fmtLots(z.executed_shares)}；撤 ${fmtLots(z.cancellation_shares)}；净加 ${fmtLots(z.net_change_shares)} 手；净加单率 ${fmtTradeRate(z.net_addition_rate_pct,z.denominator_trade_shares)}\n`+(z.observations||[]).map(o=>`  ${clock(o.received_at)} ${o.delta_shares>=0?'+':''}${fmtLots(o.delta_shares)} 手`).join('\n')).join('\n');details.append(summary,pre);td.append(details);tr.append(td);return tr;}));
+    $('bookThreeSummary').textContent=`已结算 ${entries.length} 次成交更新，买盘、卖盘分别显示全部 ${entries.length} 次，最新在前，可在表内上下滚动查看。待下次成交更新结算 ${result?.pending_intervals||0} 次。各行数量和比率均为该次更新区间值；共同成交量在两框中重复列示用于对照，不相加。全部记录仍可导出。`;
+    const visible=[...entries].reverse(),key=JSON.stringify([sessions.get(state.code)?.id,visible]);if(!clear&&key===threeRenderKey)return;threeRenderKey=key;
+    $('bookThreeRows').replaceChildren(...visible.map(w=>{
+      const tr=document.createElement('tr'),clock=t=>tickSourceTime(t).split(' ').at(-1);
+      tr.dataset.uiInterval=`${clock(w.start)} → ${clock(w.end)}`;
+      tr.dataset.uiConfirmed=tickSourceTime(w.confirmed_at);
+      tr.dataset.uiVolume=fmtLots(w.source_trade_volume_shares);
+      for(const [side,suffix]of[['bid','Bid'],['ask','Ask']]){
+        const m=w[side]||{},prefix='ui'+suffix;
+        for(const [key,value]of Object.entries({VisibleAdded:fmtLots(m.visible_added_shares),ObservedReduction:fmtLots(m.observed_reduction_shares),TradeCredit:fmtLots(m.trade_credit_shares),Added:fmtLots(m.added_shares),Cancelled:fmtLots(m.cancellation_shares),Net:fmtLots(m.net_change_shares),AdditionRate:fmtTradeRate(m.addition_rate_pct,m.denominator_trade_shares),ReductionRate:fmtTradeRate(m.reduction_rate_pct,m.denominator_trade_shares),NetRate:fmtTradeRate(m.net_addition_rate_pct,m.denominator_trade_shares)}))tr.dataset[prefix+key]=value;
+      }
+      const values=[tr.dataset.uiInterval,fmtLots(w.source_trade_volume_shares)];
+      for(const side of['bid','ask']){const m=w[side];values.push(fmtLots(m.added_shares),fmtLots(m.cancellation_shares),fmtLots(m.net_change_shares),fmtTradeRate(m.addition_rate_pct,m.denominator_trade_shares),fmtTradeRate(m.reduction_rate_pct,m.denominator_trade_shares),fmtTradeRate(m.net_addition_rate_pct,m.denominator_trade_shares));}
+      values.push(`同价变化 ${w.visibility_counts?.in_five_same_price||0} 项；进入 ${w.visibility_counts?.entered_five||0} 项；移出 ${w.visibility_counts?.left_five||0} 项`);
+      values.push(`成交更新结算；${w.sample_pairs}次盘口比较；无匹配成交的档位按0${w.ambiguous_trade_shares?'；有归侧不明成交，仅计分母':''}`);
+      for(const value of values){const td=document.createElement('td');td.textContent=String(value);tr.appendChild(td);}
+      const td=document.createElement('td'),details=document.createElement('details'),summary=document.createElement('summary'),pre=document.createElement('pre');
+      summary.textContent='逐档增减与净加单率';pre.style.cssText='white-space:pre-wrap;font-size:11px;max-width:420px';
+      pre.textContent=(w.levels||[]).map(z=>`${z.side==='bid'?'买':'卖'} ${z.price}：加 ${fmtLots(z.added_shares)}；减 ${fmtLots(z.observed_reduction_shares)}；成交 ${fmtLots(z.executed_shares)}；撤 ${fmtLots(z.cancellation_shares)}；净加 ${fmtLots(z.net_change_shares)} 手；净加单率 ${fmtTradeRate(z.net_addition_rate_pct,z.denominator_trade_shares)}\n`+(z.observations||[]).map(o=>`  ${clock(o.received_at)} ${o.delta_shares>=0?'+':''}${fmtLots(o.delta_shares)} 手`).join('\n')).join('\n');
+      details.append(summary,pre);td.append(details);tr.append(td);return tr;
+    }));
   }
   $('bookThreeCSV').addEventListener('click',()=>void exportData('three'));
   let ledgerPage=0,ledgerSession='',ledgerRenderKey='';const ledgerRowNodes=new Map();
@@ -1574,6 +1592,6 @@ window.addEventListener('blur',()=>{if(chartGesture)finishChartGesture();else if
 // Tap toggling happens only on pointerup, never on the synthetic click after a swipe.
 </script>
 
-	<script src="./ui-parity.js?v=20261026-structure3"></script>
+	<script src="./ui-parity.js?v=20261026-structure5"></script>
 </body>
 </html>
