@@ -1,6 +1,4 @@
-<!doctype html>
-<html lang="zh-CN">
-<head>
+<html lang="zh-CN"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light">
@@ -20,9 +18,111 @@ main{max-width:1180px;margin:0 auto;padding:28px 20px 60px}.hero{display:flex;ju
 @media(max-width:520px){main{padding:18px 12px 40px}.card{padding:15px}.form{grid-template-columns:1fr 1fr}.actions button{flex:1}.toolbar{align-items:flex-start;flex-direction:column}.hero h1{font-size:23px}}
 .thsdk-meta{margin:8px 0;color:var(--muted);font-size:13px}.thsdk-note{margin:10px 0 0;color:var(--muted);font-size:12px}.thsdk-scroll{max-height:420px;overflow:auto}.thsdk-scroll th{position:sticky;top:0}.thsdk-table{min-width:0}.thsdk-error{color:#a33}
 .thsdk-detail-grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:18px;align-items:stretch}.thsdk-trades{position:relative;min-width:0;min-height:0}.thsdk-trades .thsdk-scroll{position:absolute;inset:0;max-height:none}.depth-box{border:1px solid var(--line);border-radius:10px;overflow:hidden}.depth-box h3{font-size:16px;margin:0;padding:12px;background:#f7f9fc}.depth-table{min-width:0;table-layout:fixed}.depth-table th,.depth-table td{padding:7px 10px}.depth-table tr.depth-divider td{border-top:2px solid #cfd8e5}.depth-level-sell{color:var(--green)}.depth-level-buy{color:var(--red)}.depth-status{padding:10px;margin:0;font-size:12px;color:var(--muted)}@media(max-width:780px){.thsdk-detail-grid{grid-template-columns:1fr}.thsdk-trades{position:static}.thsdk-trades .thsdk-scroll{position:static;max-height:420px}.depth-box{max-width:460px;width:100%}}
-</style>
 
-<link rel="stylesheet" href="./ui-parity.css?v=20261026-structure5">
+/* Five-level price-change ledger only: buy above sell; unchanged record fields. */
+#bookLedger{min-width:0;max-width:100%}
+#bookLedger .book-ledger-sides{display:flex;flex-direction:column;gap:14px;min-width:0}
+#bookLedger .book-ledger-side{min-width:0;width:100%;border:1px solid var(--line,#dfe5ed);border-radius:9px;padding:12px}
+#bookLedger .book-ledger-side h4{margin:0 0 8px;font-size:15px}
+#bookLedger .table-wrap{width:100%;max-width:100%;overflow-x:hidden;overflow-y:auto}
+#bookLedger table{width:100%;min-width:0!important;table-layout:fixed}
+#bookLedger th,#bookLedger td{min-width:0;white-space:normal;overflow-wrap:anywhere;padding:8px 6px}
+#bookLedger .book-ledger-pager{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px}
+@media(max-width:640px){
+#bookLedger table,#bookLedger tbody{display:block;width:100%}
+#bookLedger thead{display:none}
+#bookLedger tbody tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 10px;padding:8px 0;border-top:1px solid var(--line,#dfe5ed)}
+#bookLedger tbody td{display:block;border:0;text-align:left}
+#bookLedger tbody td[data-label]::before{content:attr(data-label);display:block;font-size:12px;color:var(--muted,#667085)}
+#bookLedger tbody td:first-child,#bookLedger tbody td[colspan]{grid-column:1/-1}
+}
+</style>
+<style id="stable-favorites-style">.watchlist-panel [hidden]{display:none!important}
+.watchlist-panel .watchlist-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:0;flex-wrap:nowrap}
+.watchlist-panel .watchlist-head h2{margin:0;white-space:nowrap}
+.watchlist-panel .watchlist-head-actions{display:flex;align-items:center;gap:14px}
+.watchlist-panel .watchlist-head-actions button{white-space:nowrap}
+.watchlist-panel .watchlist-manage{margin-top:12px}
+.watchlist-panel .watchlist-tools{display:flex;gap:6px;margin:0 0 8px}
+.watchlist-panel .watchlist-tools button{padding:5px 10px;font-size:12px}
+.watchlist-panel .watchlist-items{display:grid;gap:0}
+.watchlist-panel .watchlist-row{display:flex;align-items:center;gap:10px;min-width:0;border-top:1px solid var(--line,#e5e7eb);padding:8px 0}
+.watchlist-panel .watchlist-open{display:flex;align-items:center;justify-content:space-between;gap:12px;flex:1;min-width:0;padding:5px 0;background:transparent;color:var(--text,#172033);border:0;border-radius:4px;text-align:left;box-shadow:none;cursor:pointer}
+.watchlist-panel .watchlist-open:focus-visible{outline:2px solid var(--blue,#087fc1);outline-offset:2px}
+.watchlist-panel .watchlist-identity{display:flex;flex-direction:column;gap:2px;min-width:0}
+.watchlist-panel .watchlist-name{font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.watchlist-panel .watchlist-code{font-size:11px;font-weight:400;color:var(--muted,#667085);font-variant-numeric:tabular-nums}
+.watchlist-panel .watchlist-q{font-size:14px;font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums}
+.watchlist-panel .watchlist-q.up{color:var(--up,#d33)}
+.watchlist-panel .watchlist-q.down{color:var(--down,#198754)}
+.watchlist-panel .watchlist-q.flat{color:var(--muted,#667085)}
+.watchlist-panel .watchlist-remove{flex:0 0 24px;width:24px;padding:2px;background:transparent;border:0;color:var(--muted,#667085);font-size:19px;font-weight:400}
+.watchlist-panel .watchlist-reset-check{width:17px;height:17px;flex:0 0 17px;margin:0 3px 0 0;accent-color:var(--blue,#087fc1);cursor:pointer}
+.watchlist-panel .watchlist-selection-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-top:10px;border-top:1px solid var(--line,#e5e7eb)}
+.watchlist-panel .watchlist-selection-bar button{padding:6px 10px;font-size:12px;white-space:nowrap}
+.watchlist-panel .watchlist-confirm-buttons{display:flex;gap:6px;margin-left:auto}
+.watchlist-panel #watchlistSelectionCount{white-space:nowrap;font-size:12px}
+.watchlist-panel p.small{margin:8px 0 0}
+.watchlist-panel p:empty{display:none}
+.watchlist-panel .watchlist-empty{padding:10px 0;color:var(--muted,#667085)}
+.watchlist-panel .watchlist-restore-area,.watchlist-panel .favorite-records-area{margin-top:12px;padding-top:8px;border-top:1px solid var(--line,#e5e7eb)}
+.watchlist-panel .watchlist-restore-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 0;font-size:12px}
+.watchlist-panel .watchlist-restore-row span{min-width:0;overflow-wrap:anywhere}
+@media(max-width:420px){.watchlist-panel .watchlist-head-actions{gap:12px}.watchlist-panel .watchlist-head-actions button{padding:7px 9px}.watchlist-panel .watchlist-selection-bar{gap:6px}.watchlist-panel .watchlist-selection-bar button{padding:6px 8px}}
+
+.watchlist-panel .watchlist-confirm-buttons button:not(.secondary):not(:disabled){background:var(--blue,#087fc1);color:#fff}
+
+.watchlist-panel .watchlist-heading-toggle{display:inline-flex;align-items:center;gap:6px;padding:4px 0;margin:0;background:transparent;border:0;box-shadow:none;color:inherit;font:inherit;cursor:pointer}
+.watchlist-panel .watchlist-heading-toggle:focus-visible{outline:2px solid var(--blue,#087fc1);outline-offset:3px}
+.watchlist-panel #watchlistChevron{display:inline-block;font-size:20px;line-height:1;font-weight:400}
+
+.watchlist-panel .watchlist-overall-status{margin:4px 0 0;color:var(--muted,#667085);font-size:12px;line-height:1.5}
+</style>
+<script>window.__STABLE_RECORDS_BOOTSTRAP__={items:{},heads:{},cutoffs:{}};</script>
+<script src="/stable-records.js"></script>
+<style id="paired-book-style">#bookFlowPanel.book-comparison{margin:14px 0 10px;padding:0;line-height:1.7}
+.book-comparison-title{margin:0 0 8px;font-size:18px}
+.book-side-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:12px 0}
+.book-side-card{min-width:0;padding:16px;border:1px solid var(--line,#dfe5ed);border-radius:10px;background:var(--card,#fff)}
+.book-side-card h3{margin:0 0 10px;font-size:16px;font-weight:700}
+.book-side-rate{padding:7px 0}
+.book-side-primary{font-size:15px;font-weight:700;line-height:1.6;font-variant-numeric:tabular-nums}
+.book-side-fields{margin:10px 0 0;border-top:1px solid var(--line,#dfe5ed)}
+.book-side-fields>div{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;padding:7px 0;border-bottom:1px solid var(--line,#dfe5ed);align-items:baseline}
+.book-side-fields>div:last-child{border-bottom:0}
+.book-side-fields dt{margin:0;color:var(--muted,#667085);font-size:12px}
+.book-side-fields dd{margin:0;font-size:14px;font-weight:600;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+#bookRecordsTitle{margin:0 0 16px;font-size:20px}
+#bookRecordsPanel>.book-record-subsection{min-width:0;margin:18px 0 0;padding:18px 0 0;border:0;border-top:1px solid var(--line,#dfe5ed);border-radius:0;background:transparent;line-height:1.8}
+#bookRecordsPanel>#bookThreeSecondPanel{margin-top:0;padding-top:0;border-top:0}
+#bookTradeDetailGrid{align-items:start;grid-template-columns:minmax(0,1fr)}
+#bookTradeDetailGrid .book-side-card{overflow:hidden}
+#bookTradeDetailGrid th{white-space:nowrap}
+#bookTradeDetailGrid td{font-variant-numeric:tabular-nums}
+#bookTradeDetailGrid td:nth-child(1),#bookTradeDetailGrid td:nth-child(2){white-space:normal;min-width:150px}
+#bookTradeDetailGrid .table-wrap:focus-visible{outline:2px solid var(--accent,#738b65);outline-offset:2px}
+#bookRecordsPanel .book-record-subsection h2,#bookRecordsPanel .book-record-subsection h3{font-size:16px}
+#bookRecordsPanel .table-wrap{max-width:100%}
+@media(max-width:640px){.book-side-grid{grid-template-columns:minmax(0,1fr);gap:12px}.book-side-card{padding:14px}}
+
+/* Only the optional reconciliation UI is hidden; live snapshot details remain visible. */
+#bookAuditPanel{display:none!important}
+
+</style>
+<style id="trade-detail-display-trim">
+/* Display only: retain all original records, values, exports and calculations. */
+#bookTradeDetailGrid th:nth-child(2),
+#bookTradeDetailGrid td:nth-child(2),
+#bookTradeDetailGrid th:nth-child(4),
+#bookTradeDetailGrid td:nth-child(4),
+#bookLedger { display: none !important; }
+</style>
+<style id="all-tables-sticky-head">
+/* Display only: bounded two-axis scrolling; keep every existing row and column. */
+.table-wrap,.table-scroll{position:relative;max-height:460px;overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;isolation:isolate}
+table thead th{position:-webkit-sticky;position:sticky;top:0;z-index:2;background:#f7f9fc;box-shadow:0 1px 0 var(--line,#e3e9f2)}
+.table-scroll{width:100%;max-width:100%}
+</style>
 </head>
 <body>
 <main>
@@ -33,67 +133,75 @@ main{max-width:1180px;margin:0 auto;padding:28px 20px 60px}.hero{display:flex;ju
 
   <section class="card">
     <form id="queryForm" class="form">
-      <div class="field query-field"><label for="query">股票代码或名称</label><input id="query" autocomplete="off" placeholder="例如 600000 或 浦发银行" required><div class="history-tools"><select id="historySelect" aria-label="最近输入的股票"><option value="">选择最近输入的股票…</option></select><button class="secondary" id="clearHistoryBtn" type="button" disabled>清除历史</button></div></div>
-      <div class="field"><label for="start">开始日期（可选）</label><input id="start" type="date"></div>
-      <div class="field"><label for="end">结束日期（可选）</label><input id="end" type="date"></div>
-      <div class="field sampling-field"><label for="interval">实时采样（秒）</label><input id="interval" type="number" min="1" max="600" value="1"><span class="field-hint">本页轮询间隔，默认每 1 秒。</span></div>
-      <div class="actions"><button class="primary" id="runBtn" type="submit">查询 / 开始</button><button class="secondary" id="stopBtn" type="button">停止刷新</button></div>
+      <div class="field query-field"><label for="query" data-manus_clickable="true" data-manus_click_id="1">股票代码或名称</label><input id="query" autocomplete="off" placeholder="例如 600000 或 浦发银行" required="" data-manus_clickable="true" data-manus_click_id="2"><div class="history-tools"><select id="historySelect" aria-label="最近输入的股票" data-manus_clickable="true" data-manus_click_id="3"><option value="">选择最近输入的股票…</option><option value="601086">601086｜国芳集团</option><option value="600121">600121｜郑州煤电</option><option value="002272">002272｜川润股份</option><option value="600354">600354｜敦煌种业</option></select><button class="secondary" id="clearHistoryBtn" type="button" data-manus_clickable="true" data-manus_click_id="4">清除历史</button></div></div>
+      <div class="field"><label for="start" data-manus_clickable="true" data-manus_click_id="5">开始日期（可选）</label><input id="start" type="date" data-manus_clickable="true" data-manus_click_id="6"></div>
+      <div class="field"><label for="end" data-manus_clickable="true" data-manus_click_id="7">结束日期（可选）</label><input id="end" type="date" data-manus_clickable="true" data-manus_click_id="8"></div>
+      <div class="field"><label for="interval" data-manus_clickable="true" data-manus_click_id="9">实时采样（秒）</label><input id="interval" type="number" min="1" max="600" step="1" value="1" data-manus_clickable="true" data-manus_click_id="10"><span id="samplingSyncStatus" class="small" role="status" style="display:block;margin-top:4px">与服务器自选采集同步：每 1 秒；修改后自动保存。</span></div>
+      <div class="actions"><button class="primary" id="runBtn" type="submit" data-manus_clickable="true" data-manus_click_id="11">查询 / 开始</button><button class="secondary" id="stopBtn" type="button" data-manus_clickable="true" data-manus_click_id="12">停止刷新</button></div>
     </form>
     <div class="toolbar">
-      <label><input id="noNews" type="checkbox"> 不抓取新闻与公告</label>
-      <div><button class="secondary" id="csvBtn" type="button" disabled>下载 CSV</button> <button class="secondary" id="mdBtn" type="button" disabled>下载报告</button></div>
+      <label data-manus_clickable="true" data-manus_click_id="13"><input id="noNews" type="checkbox" data-manus_clickable="true" data-manus_click_id="14"> 不抓取新闻与公告</label>
+      <div><button class="secondary" id="csvBtn" type="button" disabled="" data-manus_clickable="true" data-manus_click_id="15">下载 CSV</button> <button class="secondary" id="mdBtn" type="button" disabled="" data-manus_clickable="true" data-manus_click_id="16">下载报告</button></div>
     </div>
     <div id="status">输入股票名称或代码查询。自选由服务器自动记录。</div>
   </section>
 
-  <section class="card watchlist-panel" id="watchlistPanel" aria-labelledby="watchlistTitle">
-  <details class="watchlist-fold">
-    <summary class="watchlist-fold-summary">
-      <h2 id="watchlistTitle">我的自选</h2>
-      <span id="watchlistStatus" class="small watchlist-status" role="status"></span>
-    </summary>
-    <div class="watchlist-fold-content">
-      <div class="watchlist-actions">
-        <button class="secondary" id="rateResetAll" type="button">重置今日比率累计（全部自选＋当前股）</button>
-        <button class="secondary" id="watchlistPause" type="button" aria-expanded="false" aria-controls="collectionSelection">暂停／继续采集</button>
-        <a class="secondary" id="localClearLink" href="/clear-local.html?v=scoped-reset-v1">按股票／日期清除记录</a>
-      </div>
-      <p class="small">在股票名称旁点击“加入自选”。打开本网页即为所有自选股同时采集普通 THSDK 五档与逐笔，搜索其他股票不会打断自选采集。仅在本页面运行，休市不轮询；关页、后台节流或断网会留下缺口，不能补回历史五档。</p>
-      <p id="rateResetStatus" class="small" role="status">仅重置今日加单、撤单与共同成交分母的累计起点；点击后先核对股票清单，不删除任何记录，不重启录制。</p>
-      <section id="collectionSelection" hidden aria-labelledby="collectionSelectionTitle" style="border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0">
-        <h3 id="collectionSelectionTitle" style="margin:0 0 8px">选择要暂停／继续采集的股票</h3>
-        <p class="small">范围为全部自选＋当前查询股。勾选后点击操作才生效；未选股票不受影响。只控制本页后续五档与逐笔记录，不删除数据、不重置累计；行情和图表仍可查看。暂停设置仅在当前页面有效。</p>
-        <div style="display:flex;gap:8px;flex-wrap:wrap"><button id="collectionSelectAll" class="secondary" type="button">一键全选</button><button id="collectionSelectNone" class="secondary" type="button">全不选</button></div>
-        <div id="collectionSelectionItems" style="display:grid;gap:8px;margin:10px 0;max-height:300px;overflow:auto"></div>
-        <p id="collectionSelectionCount" class="small" role="status"></p>
-        <div style="display:flex;gap:8px;flex-wrap:wrap"><button id="collectionPauseSelected" class="secondary" type="button">暂停所选采集</button><button id="collectionResumeSelected" class="secondary" type="button">继续所选采集</button><button id="collectionSelectionCancel" class="secondary" type="button">取消</button></div>
-      </section>
-      <p id="collectionActionStatus" class="small" role="status"></p>
-      <div id="watchlistItems" style="display:grid;gap:8px"></div>
+<section class="card watchlist-panel" id="watchlistPanel" aria-labelledby="watchlistTitle">
+  <div class="section-head watchlist-head">
+    <h2 id="watchlistTitle"><button class="watchlist-heading-toggle" id="watchlistReveal" type="button" aria-label="展开我的自选" aria-expanded="false" aria-controls="watchlistManage" data-manus_clickable="true" data-manus_click_id="17"><span>我的自选</span><span id="watchlistChevron" aria-hidden="true">⌄</span></button></h2>
+    <div class="watchlist-head-actions">
+      <button class="secondary" id="watchlistRemove" type="button" hidden="" style="display:none!important" aria-hidden="true">管理</button>
+      <button class="secondary" id="watchlistReset" type="button" hidden="" style="display:none!important" aria-hidden="true">重置</button>
     </div>
-  </details>
+  </div>
+  <p id="watchlistOverallStatus" class="small watchlist-overall-status" role="status" aria-live="polite">收盘休市</p>
+  <div id="watchlistManage" class="watchlist-manage" hidden="" style="display:none!important" aria-hidden="true">
+    <div id="watchlistItems" class="watchlist-items" hidden="" style="display:none!important" aria-hidden="true"></div>
+    <div id="watchlistResetArea" class="watchlist-reset-area" hidden="" style="display:none!important" aria-hidden="true">
+      <div class="watchlist-selection-bar">
+        <button class="secondary" id="watchlistSelectAll" type="button">全选</button>
+        <span id="watchlistSelectionCount" class="small" role="status">已选 0 只</span>
+        <div class="watchlist-confirm-buttons">
+          <button id="watchlistConfirmReset" type="button" hidden="" style="display:none!important" disabled="">确认重置</button>
+          <button class="secondary" id="watchlistConfirmRemove" type="button" hidden="" style="display:none!important" disabled="">确认移出</button>
+          <button class="secondary" id="watchlistCancelReset" type="button">取消</button>
+        </div>
+      </div>
+      <p id="watchlistResetStatus" class="small" role="status"></p>
+    </div>
+    <p id="watchlistStatus" class="small" role="status" hidden="" style="display:none!important"></p>
+    <p id="collectionActionStatus" class="small" role="status" hidden="" style="display:none!important"></p>
+    <p id="rateResetStatus" class="small" role="status" hidden="" style="display:none!important"></p>
+    <div id="favoriteRestoreArea" class="watchlist-restore-area" hidden="" style="display:none!important" aria-hidden="true">
+      <div id="favoriteRestoreItems"></div><p id="favoriteRestoreStatus" class="small" role="status"></p>
+    </div>
+    <div id="favoriteRecordsArea" class="favorite-records-area" hidden="" style="display:none!important" aria-hidden="true">
+      <div id="favoriteRecordActions"><button id="bookRecordRestart" class="secondary" type="button">刷新服务器记录</button><button id="bookRecordJSON" class="secondary" type="button">导出原始记录 JSON</button><button id="bookRecordCSV" class="secondary" type="button">导出五档变化 CSV</button><button id="bookStatsCSV" class="secondary" type="button">导出累计统计 CSV</button></div><div id="favoriteHistoryHost"><section id="bookSavedHistory" class="card"><h2>服务器历史记录（只读）</h2><p class="small">跨日、切换股票或重置今日比率不会删除已保存的原始记录。这里按北京时间查看该股当天全部录制会话，不受当前会话起点、走势图选点或今日比率起点限制；不改变实时采集与上方统计。五档按收到日期、逐笔按源成交日期归档；点击“刷新服务器历史”读取新增记录。数据仅在服务器保存，未采集的时段不能补造。</p><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><label>记录日期 <select id="bookHistoryDay" aria-label="服务器记录日期"></select></label><label>记录类型 <select id="bookHistoryKind" aria-label="本地记录类型"><option value="depth">五档原始快照</option><option value="ticks">逐笔原始记录</option></select></label><button id="bookHistoryRefresh" type="button" class="secondary">刷新服务器历史</button><button id="bookHistoryExport" type="button" class="secondary">导出所选日期原始 JSON</button></div><p id="bookHistorySummary" class="small" role="status">查询股票后读取服务器已有记录。</p><details><summary>当日录制时段 / 会话（不连接缺口）</summary><div id="bookHistoryPeriods" class="small"></div></details><div class="table-wrap" style="max-height:400px;margin-top:8px"><table style="min-width:640px"><thead><tr><th>记录时间（北京）</th><th>原始记录</th></tr></thead><tbody id="bookHistoryRows"></tbody></table></div><div style="display:flex;gap:10px;align-items:center;margin-top:8px"><button id="bookHistoryPrev" type="button" class="secondary">历史较新页</button><span id="bookHistoryPage" class="small"></span><button id="bookHistoryNext" type="button" class="secondary">历史较早页</button></div></section></div>
+    </div>
+  </div>
 </section>
 
-<section id="result" hidden>
+
+<section id="result" hidden="">
     <section class="card">
-      <div class="section-head"><div><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><h2 class="stock-title" id="stockTitle">—</h2><button id="watchlistToggle" class="secondary" type="button" disabled aria-pressed="false">加入自选</button></div><div class="small" id="tradeDate"></div><div class="small" style="margin-top:7px;display:flex;flex-wrap:wrap;gap:4px 14px"><span id="stockIndustry">所属行业：待查询</span><span id="stockFloatCap" title="腾讯最新行情流通市值；切换历史走势时不表示历史市值">流通市值：待查询</span></div><div class="small" id="stockTags" style="margin-top:5px;line-height:2">板块 / 标签：待查询</div></div><div style="display:flex;align-items:center;gap:9px"><label class="small" for="chartDate">走势日期</label><input id="chartDate" type="date" style="height:36px;border:1px solid #cfd8e5;border-radius:7px;padding:0 8px"><span class="small" id="quoteTime"></span></div></div>
+      <div class="section-head"><div><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><h2 class="stock-title" id="stockTitle">—</h2><button id="watchlistToggle" class="secondary" type="button" disabled="" aria-pressed="false">加入自选</button></div><div class="small" id="tradeDate"></div><div class="small" style="margin-top:7px;display:flex;flex-wrap:wrap;gap:4px 14px"><span id="stockIndustry">所属行业：待查询</span><span id="stockFloatCap" title="腾讯最新行情流通市值；切换历史走势时不表示历史市值">流通市值：待查询</span></div><div class="small" id="stockTags" style="margin-top:5px;line-height:2">板块 / 标签：待查询</div></div><div style="display:flex;align-items:center;gap:9px"><label class="small" for="chartDate">走势日期</label><input id="chartDate" type="date" style="height:36px;border:1px solid #cfd8e5;border-radius:7px;padding:0 8px"><span class="small" id="quoteTime"></span></div></div>
       <div class="price-top"><strong id="latestPrice">—</strong><span id="latestChange" class="change">—</span><span id="latestGap" class="change" title="（累计成交量×所选价格−累计成交额）÷累计成交额">差：—</span><span id="latestZeroLine" class="change" title="零线价格＝累计成交额（元）÷累计成交量（股）；该价格使累计量×价−累计成交额为零">零线：—</span><span id="chartOpen" class="change" title="所选走势日期的开盘价，不随选中时刻改变">开盘价：—</span><span id="chartPrevClose" class="change" title="所选走势日期前一个交易日的收盘价，不随选中时刻改变">昨收价：—</span><span id="latestAmount" class="change">成交额：—</span><span id="latestVolumeRatio" class="change" title="量比＝截至所选时刻累计成交量÷已交易分钟÷（此前5个交易日总成交量÷1200）；午休不计时，跟随分时选点。">量比：—</span></div>
       <svg id="chart" viewBox="0 0 1000 420" role="img" aria-label="当日实时价格走势图"></svg>
-      <div id="chartPointInfo" aria-live="polite">轻点固定所选时刻，再点同一位置取消，点其他位置切换；滑动查看后松手恢复最新值。</div>
+      <div id="chartPointInfo" aria-live="polite">轻点固定所选时刻，再点同一位置取消，点其他位置切换；滑动查看后松手恢复最新值。</div><div id="bookFlowPanel" class="book-comparison" style=""><h2 class="book-comparison-title">五档加单与撤单</h2><div id="bookFlowAt" class="small">查询后开始累计。</div><div id="bookFlowVolume" style="font-weight:600" aria-live="polite">共同成交量：等待有效观察区间。</div><div class="book-side-grid"><section id="bookSideBid" class="book-side-card" aria-labelledby="bookSideBidTitle"><h3 id="bookSideBidTitle">买盘五档</h3><div class="book-side-rate"><strong id="bookFlowBid" class="book-side-primary">买盘累计撤单率：—</strong></div><div class="book-side-rate"><strong id="bookBidAddition" class="book-side-primary"></strong></div><dl id="bookSideBidFields" class="book-side-fields"><div data-field="added_shares"><dt>累计加单（手）</dt><dd>—</dd></div><div data-field="cancellation_shares"><dt>累计撤单（手）</dt><dd>—</dd></div><div data-field="net_change_shares"><dt>净加单（手）</dt><dd>—</dd></div><div data-field="net_addition_rate_pct"><dt>净加单率</dt><dd>—</dd></div><div data-field="observed_reduction_shares"><dt>合计减少（手）</dt><dd>—</dd></div><div data-field="trade_credit_shares"><dt>成交抵扣（手）</dt><dd>—</dd></div><div data-field="denominator_trade_shares"><dt>共同成交量（手）</dt><dd>—</dd></div></dl></section><section id="bookSideAsk" class="book-side-card" aria-labelledby="bookSideAskTitle"><h3 id="bookSideAskTitle">卖盘五档</h3><div class="book-side-rate"><strong id="bookFlowAsk" class="book-side-primary">卖盘累计撤单率：—</strong></div><div class="book-side-rate"><strong id="bookAskAddition" class="book-side-primary"></strong></div><dl id="bookSideAskFields" class="book-side-fields"><div data-field="added_shares"><dt>累计加单（手）</dt><dd>—</dd></div><div data-field="cancellation_shares"><dt>累计撤单（手）</dt><dd>—</dd></div><div data-field="net_change_shares"><dt>净加单（手）</dt><dd>—</dd></div><div data-field="net_addition_rate_pct"><dt>净加单率</dt><dd>—</dd></div><div data-field="observed_reduction_shares"><dt>合计减少（手）</dt><dd>—</dd></div><div data-field="trade_credit_shares"><dt>成交抵扣（手）</dt><dd>—</dd></div><div data-field="denominator_trade_shares"><dt>共同成交量（手）</dt><dd>—</dd></div></dl></section></div><div id="bookFlowInstant" class="small"></div><div id="bookFlowCoverage" class="small"></div><div hidden="" aria-hidden="true" style="display: none !important;"><div id="bookFlowBidDetail" class="small"></div><div id="bookBidAdditionDetail"></div><div id="bookFlowAskDetail" class="small"></div><div id="bookAskAdditionDetail"></div><p id="bookAdditionAt" class="small"></p><p id="bookThreeSource" class="small"></p></div></div>
       <div class="chart-note" id="chartInfo">近期日期显示历史分钟线；当前交易日会用历史分钟线补齐开盘以来的曲线，并叠加页面实时采样。超过数据源保留范围的分时历史无法补取。</div>
     </section>
 
-    <section class="card" id="thsdkTicks" aria-labelledby="thsdkTitle">
-      <div class="section-head" style="flex-wrap:wrap"><div style="display:flex;align-items:baseline;gap:6px 12px;flex-wrap:wrap"><h2 id="thsdkTitle">成交明细</h2><span class="small" id="thsdkLoadedSummary" aria-live="polite" aria-atomic="true" title="直接显示接口返回的累计成交笔数（transaction_count），随刷新更新；缺失时保留同一股票同日最近有效返回值，不以记录行数或成交手数代替。">累计成交 —笔</span></div><span class="small" id="thsdkStockLabel">跟随上方查询股票</span></div>
+    <section id="bookRecordsPanel" class="card" aria-labelledby="bookRecordsTitle"><h2 id="bookRecordsTitle">记录</h2><section id="bookThreeSecondPanel" class="book-record-subsection"><h3>成交更新明细</h3><button id="bookThreeCSV" class="secondary" type="button">导出全部成交更新区间 CSV</button><p id="bookThreeSummary" class="small" role="status"></p><div id="bookTradeDetailGrid" class="book-side-grid"><section id="bookTradeBid" class="book-side-card" aria-labelledby="bookTradeBidTitle"><h3 id="bookTradeBidTitle">买盘成交更新明细</h3><p class="small">按成交更新逐次列出 · 数量单位：手</p><div class="table-wrap" style="max-height:460px" role="region" aria-label="买盘成交更新明细表，可横向滚动" tabindex="0"><table style="min-width:1080px"><thead><tr><th>成交更新区间（北京）</th><th>结算确认时间（北京）</th><th>本区间共同成交量（手）</th><th>观察增加（手）</th><th>合计减少（手）</th><th>成交抵扣（手）</th><th>加单（手）</th><th>撤单（手）</th><th>净加单（手）</th><th>加单率</th><th>撤单率</th><th>净加单率</th></tr></thead><tbody id="bookThreeBidRows"></tbody></table></div></section><section id="bookTradeAsk" class="book-side-card" aria-labelledby="bookTradeAskTitle"><h3 id="bookTradeAskTitle">卖盘成交更新明细</h3><p class="small">按成交更新逐次列出 · 数量单位：手</p><div class="table-wrap" style="max-height:460px" role="region" aria-label="卖盘成交更新明细表，可横向滚动" tabindex="0"><table style="min-width:1080px"><thead><tr><th>成交更新区间（北京）</th><th>结算确认时间（北京）</th><th>本区间共同成交量（手）</th><th>观察增加（手）</th><th>合计减少（手）</th><th>成交抵扣（手）</th><th>加单（手）</th><th>撤单（手）</th><th>净加单（手）</th><th>加单率</th><th>撤单率</th><th>净加单率</th></tr></thead><tbody id="bookThreeAskRows"></tbody></table></div></section></div></section><section class="book-record-subsection" id="thsdkTicks" aria-labelledby="thsdkTitle">
+      <div class="section-head" style="flex-wrap:wrap"><h2 id="thsdkTitle">成交明细</h2><span class="small" id="thsdkStockLabel">跟随上方查询股票</span></div>
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px"><span id="thsdkMode" class="small">默认显示最新可用成交，选点查看对应时刻。</span><button class="secondary" id="tickLatestBtn" type="button">返回最新</button></div>
       <p id="thsdkStatus" class="thsdk-meta" role="status">查询后显示最新可用成交。</p>
       <div id="thsdkRowStats" class="thsdk-meta" aria-live="polite" aria-atomic="true" style="padding:10px 12px;border:1px solid var(--line);border-radius:8px;line-height:1.9">成交记录统计：待加载。</div>
       <div class="thsdk-detail-grid">
-        <div class="thsdk-trades"><div class="table-wrap thsdk-scroll" id="thsdkTableWrap" hidden><table class="thsdk-table"><thead id="thsdkTickHead"></thead><tbody id="thsdkTickBody"></tbody></table></div></div>
-        <aside class="depth-box" aria-label="最新可用五档，与历史成交独立"><h3>买卖五档</h3><div style="padding:9px 10px;border-bottom:1px solid var(--line)"><button class="secondary" id="depthReadOnce" type="button" title="仅向源接口读取一次最新可用五档，不开启自动刷新">刷新五档</button></div><table class="depth-table"><thead><tr><th>档位</th><th>委托价格</th><th>委托量（手）</th></tr></thead><tbody id="thsdkDepthBody"></tbody></table><p class="depth-status" id="thsdkDepthStatus">查询后自动显示最新可用五档；交易时段随页面刷新，休市保留最后有效数据。</p></aside>
+        <div class="thsdk-trades"><div class="table-wrap thsdk-scroll" id="thsdkTableWrap" hidden=""><table class="thsdk-table"><thead id="thsdkTickHead"></thead><tbody id="thsdkTickBody"></tbody></table></div></div>
+        <aside class="depth-box" aria-label="最新可用五档，与历史成交独立"><h3>买卖五档</h3><div style="padding:9px 10px;border-bottom:1px solid var(--line)"><button class="secondary" id="depthReadOnce" type="button" title="仅向源接口读取一次最新可用五档，不开启自动刷新" disabled="">刷新五档</button></div><div class="table-scroll"><table class="depth-table"><thead><tr><th>档位</th><th>委托价格</th><th>委托量（手）</th></tr></thead><tbody id="thsdkDepthBody"><tr><td class="depth-level-sell">卖五</td><td>—</td><td>—</td></tr><tr><td class="depth-level-sell">卖四</td><td>—</td><td>—</td></tr><tr><td class="depth-level-sell">卖三</td><td>—</td><td>—</td></tr><tr><td class="depth-level-sell">卖二</td><td>—</td><td>—</td></tr><tr><td class="depth-level-sell">卖一</td><td>—</td><td>—</td></tr><tr class="depth-divider"><td class="depth-level-buy">买一</td><td>—</td><td>—</td></tr><tr><td class="depth-level-buy">买二</td><td>—</td><td>—</td></tr><tr><td class="depth-level-buy">买三</td><td>—</td><td>—</td></tr><tr><td class="depth-level-buy">买四</td><td>—</td><td>—</td></tr><tr><td class="depth-level-buy">买五</td><td>—</td><td>—</td></tr></tbody></table></div><p class="depth-status" id="thsdkDepthStatus">查询后自动显示最新可用五档；交易时段随页面刷新，休市保留最后有效数据。</p></aside>
       </div>
-      <p class="thsdk-note">时间均为北京时间。默认显示最新可用数据，交易时段自动刷新；休市不轮询，首次进入最新视图自动读取一次，此后保留最后有效数据。选点仅显示该时刻前一分钟的成交；历史数据不可用时不以其他日期代替。数据源不支持历史五档，选点时不展示最新盘口冒充历史。成交量与五档委托量按原始数量÷100显示为手；原始数据保持不变。行情可能延迟，暂未验证与官方客户端一致。</p>
-    </section>
+      <p class="thsdk-note">时间均为北京时间。默认显示最新可用数据，交易时段自动刷新；休市不自动读取行情源，仅显示服务器已存记录；手动刷新只读取一次。选点仅显示该时刻前一分钟的成交；历史数据不可用时不以其他日期代替。数据源不支持历史五档，选点时不展示最新盘口冒充历史。成交量与五档委托量按原始数量÷100显示为手；原始数据保持不变。行情可能延迟，暂未验证与官方客户端一致。</p>
+    </section><section id="bookLedger" class="book-record-subsection"><h3 style="margin:0">五档价位变化明细</h3><p class="small">保留逐次快照的时间、盘口侧、价格、挂量和净变化，不显示五档范围状态标签。缺失挂量仍为未知、不填0；保存的数据与统计口径不变。</p><label class="small">显示 <select id="bookLedgerFilter"><option value="all">全部盘口侧</option><option value="bid">买盘</option><option value="ask">卖盘</option></select></label><button id="bookLedgerCSV" class="secondary" type="button">导出可见挂量明细 CSV</button> <p id="bookLedgerSummary" class="small" role="status"></p><div class="book-ledger-sides"><section id="bookLedgerBid" class="book-ledger-side" aria-labelledby="bookLedgerBidTitle"><h4 id="bookLedgerBidTitle">买盘明细</h4><div class="table-wrap" style="max-height:420px" role="region" aria-label="买盘价位变化明细"><table style="min-width: 0px;"><thead><tr><th>时间</th><th>盘口 / 价格</th><th>挂量变化（手）</th><th>变动（手）</th></tr></thead><tbody id="bookLedgerRows"></tbody></table></div></section><section id="bookLedgerAsk" class="book-ledger-side" aria-labelledby="bookLedgerAskTitle"><h4 id="bookLedgerAskTitle">卖盘明细</h4><div class="table-wrap" style="max-height:420px" role="region" aria-label="卖盘价位变化明细"><table style="min-width: 0px;"><thead><tr><th>时间</th><th>盘口 / 价格</th><th>挂量变化（手）</th><th>变动（手）</th></tr></thead><tbody id="bookLedgerAskRows"></tbody></table></div></section></div><div style="display:flex;gap:10px;align-items:center;margin-top:8px" class="book-ledger-pager"><button id="bookLedgerPrev" class="secondary" type="button">较新</button><span id="bookLedgerPage" class="small"></span><button id="bookLedgerNext" class="secondary" type="button">较早</button></div></section><details id="bookAuditPanel" class="book-record-subsection" hidden="" aria-hidden="true" style="display: none !important;"><summary style="cursor:pointer;font-size:1.17em;font-weight:700">上下数量核对：实时快照 ↔ 成交更新汇总（点击展开/收起）</summary><p class="small">从下方保存的原始快照重新按同侧、同价格及相同成交更新区间计算，再核对上方窗口增减量、成交分母和累计值；同时检查原始变化行是否与快照相符。进入、移出五档不推断加撤，原始缺失值不改。差额＝上方统计−原始重算；0表示该项数量一致。</p><p id="bookAuditStatus" role="status" style="font-weight:600">等待可比较的盘口快照。</p><p id="bookAuditCumulative" class="small"></p><div class="table-wrap" style="max-height:320px"><table style="min-width:1080px"><thead><tr><th>成交更新区间（北京）</th><th>核对状态</th><th>原始快照数 / 比较次数</th><th>买增加差（手）</th><th>买减少差（手）</th><th>卖增加差（手）</th><th>卖减少差（手）</th><th>成交量差（手）</th><th>核对说明</th></tr></thead><tbody id="bookAuditRows"></tbody></table></div><p class="hint">每次响应后核对当前已结算的成交更新区间，一致不代表源数据完整；仅核对可观测数量，不是交易所逐委托订单核销；资料不足、待确认或排除的时段不会冒充“核对一致”。滑动趋势图按选点之前已收到的数据重新核对。全部核对结果随原始记录JSON导出。</p></details><section class="book-record-subsection" id="bookRecorder"><div class="section-head" style="flex-wrap:wrap"><h2>实时快照明细（逐次接口返回） / 记录管理</h2></div><p class="small">自选股由服务器在交易时段自动采集；关闭网页后继续。同股同日接续后台会话，重置后从服务器确认的新起点累计。滑动趋势图仍记录当前盘口，选点按当时已收到的数据重算，不使用后来数据。</p><p id="bookRecordStatus" class="small" role="status">等待查询；新记录仅保存到服务器。</p><div style="display:flex;gap:8px;flex-wrap:wrap"></div><p id="bookStatsDetail" class="small"></p><details><summary>方向与比率如何计算？</summary><p class="hint">每次五档更新，按同侧、同价格记录每一次增加和减少，不用首尾差额抵消中途变化。直到成交明细出现新记录时结算这一段，间隔不固定，不按3秒切窗。每次更新都汇总买卖两侧全部五档：每档先累加该段所有正变化和负变化；若减少－同价成交为正，计撤单；若为负，其绝对值转为加单。所以加单＝观察增加＋max(0，同价成交－合计减少)，撤单＝max(0，合计减少－同价成交)；净加单＝加单－撤单。同价没有成交记录或成交为0，均按0手成交。成交大于合计减少时，超出部分转记加单。重复非空响应不重复结算；成功空响应按零成交更新。逐档计算后再分别合计买盘、卖盘。加单率、撤单率、净加单率分别用对应累计数量÷观察期间累计全部成交量×100%；分母含五档内外，每笔只计一次。分母为0时数量保留，比率无法计算；比率可超过100%，不是涨跌概率。盘口价位移动按价格跟踪；进入或移出五档因外部余量未知，仅记边界，不凭空算加撤。成交价仅唯一对应一侧时抵扣该档减少，归侧不明只计分母。尚未出现下一次成交明细更新的变化保留在原始明细中，等待结算。暂停、断网和无效快照不连接比较。本统计仅为可观测快照推算，并非交易所逐笔委托；同一采样间未看到的变化无法补造，原始数据不删改。</p></details><p id="bookSnapshotCadence" class="small">下表随每轮成功返回后保存/更新的盘口快照更新，不是3秒汇总。快照变化明细由相邻成功快照对比得出，只反映采样时可观察到的变化；采样间的盘口变化可能无法记录。成交更新在收到新成交数据后结算相应变化。上游缓存、请求耗时及后台调度仍可能造成延迟或缺口；这不是数据源主动推送每次真实盘口变化。展示最近变化，全部记录可导出。</p><div id="bookRawChangesTable" class="table-wrap" style="margin-top:12px;max-height:300px"><table style="min-width:620px"><thead><tr><th>读取时间（北京）</th><th>盘口侧 / 价格</th><th>上次可见挂量（手）</th><th>本次可见挂量（手）</th><th>净变化（手）</th></tr></thead><tbody id="bookRecordRows"></tbody></table></div><p class="hint">五档未提供交易所事件时间，读取时间不等于委托变化时间；加单率、撤单率按上述五档快照口径计算。进入、移出五档仅记边界，不作为加撤单；原始缺失挂量仍保留原样。服务中断、源故障或限速可能留下不可补回的五档缺口。原始数据仅保存在服务器，按原采集日保留5个交易日；可导出备份。</p></section><details class="book-record-subsection"><summary>加单与撤单统计说明</summary><p class="small">成交明细每次更新时结算全部五档。每档撤单＝max(0，累计减少－该档成交)，无成交按0；若减少减成交为负，负值绝对值转为加单；净加单＝加单－撤单，可为负。各项比率使用观察期全部去重成交作共同分母。</p></details></section>
 
     <section class="card">
       <div class="section-head"><h2>日线量价表</h2><span class="small" id="rangeLabel"></span></div>
@@ -130,23 +238,23 @@ main{max-width:1180px;margin:0 auto;padding:28px 20px 60px}.hero{display:flex;ju
 @media(max-width:520px){#clsTelegraph .cls-tools{gap:8px}#clsTelegraph button{padding:0 11px}#clsTelegraph .cls-feed{max-height:560px}}
 </style>
 <section class="card" id="clsTelegraph" aria-labelledby="clsTitle">
-  <div class="section-head" style="flex-wrap:wrap"><h2 id="clsTitle">财联社 · 新闻电报</h2><a class="small" href="https://www.cls.cn/telegraph" target="_blank" rel="noopener noreferrer">财联社官方原文</a></div>
+  <div class="section-head" style="flex-wrap:wrap"><h2 id="clsTitle">财联社 · 新闻电报</h2><a class="small" href="https://www.cls.cn/telegraph" target="_blank" rel="noopener noreferrer" data-manus_clickable="true" data-manus_click_id="18">财联社官方原文</a></div>
   <div class="cls-tools">
-    <label class="cls-date" for="clsDate">查看日期（北京时间）<input id="clsDate" type="date" aria-describedby="clsHelp"></label>
-    <button class="secondary" id="clsRecent" type="button">最近三天</button>
-    <button class="secondary" id="clsRefresh" type="button">刷新电报</button>
-    <label class="cls-auto"><input id="clsAuto" type="checkbox" checked> 每 30 秒更新</label>
+    <label class="cls-date" for="clsDate" data-manus_clickable="true" data-manus_click_id="19">查看日期（北京时间）<input id="clsDate" type="date" aria-describedby="clsHelp" max="2026-10-26" data-manus_clickable="true" data-manus_click_id="20"></label>
+    <button class="secondary" id="clsRecent" type="button" data-manus_clickable="true" data-manus_click_id="21">最近三天</button>
+    <button class="secondary" id="clsRefresh" type="button" data-manus_clickable="true" data-manus_click_id="22">刷新电报</button>
+    <label class="cls-auto" data-manus_clickable="true" data-manus_click_id="23"><input id="clsAuto" type="checkbox" checked="" data-manus_clickable="true" data-manus_click_id="24"> 每 30 秒更新</label>
   </div>
   <p class="hint" id="clsHelp">独立展示全市场电报，不跟随上方股票筛选。默认最近三天（今天及前两天）；可选择其他日期，历史数据以官方接口可返回范围为准。每批加载 20 条，点击下方按钮继续查看。</p>
-  <p class="cls-status" id="clsStatus" role="status" aria-live="polite">正在读取财联社官方电报…</p>
-  <div class="cls-feed" id="clsFeed" aria-label="财联社电报列表"></div>
-  <div class="cls-bottom"><button class="secondary" id="clsMore" type="button" disabled>加载更早电报</button><span class="small" id="clsCount"></span></div>
+  <p class="cls-status" id="clsStatus" role="status" aria-live="polite">最近三天 · 官方数据读取于 19:10:11（北京时间） · 每 30 秒更新</p>
+  <div class="cls-feed" id="clsFeed" aria-label="财联社电报列表"><article class="cls-item" data-id="2515496"><time datetime="2026-10-26T19:08:21+08:00">2026-10-26 19:08:21 北京时间</time><h3><a href="https://www.cls.cn/detail/2515496" target="_blank" rel="noopener noreferrer" data-manus_clickable="true" data-manus_click_id="25">建新股份：前三季度净利润同比增长1555.93% 主要产品销量增加、价格上升</a></h3><p>【建新股份：前三季度净利润同比增长1555.93% 主要产品销量增加、价格上升】财联社10月26日电，建新股份(300107.SZ)公告称，第三季度营业收入为2.15亿元，同比增长101.90%；净利润为5108.98万元，同比增长8427.88%。前三季度营业收入为5.75亿元，同比增长67.01%；净利润为9895.98万元，同比增长1555.93%。业绩变动主要系本期主要产品销量增加、销售价格上升所致。小财注：公司Q3净利润0.51亿，Q2净利润0.41亿，据此计算，Q3净利润环比增长23%。</p></article><article class="cls-item" data-id="2515495"><time datetime="2026-10-26T19:07:47+08:00">2026-10-26 19:07:47 北京时间</time><h3><a href="https://www.cls.cn/detail/2515495" target="_blank" rel="noopener noreferrer" data-manus_clickable="true" data-manus_click_id="26">中铝国际：中标越南55.95亿元氧化铝项目</a></h3><p>【中铝国际：中标越南55.95亿元氧化铝项目】财联社10月26日电，中铝国际(601068.SH)公告称，公司中标越南平福矿业年产240万吨氧化铝项目，合同总价8.33亿美元，折合人民币约55.95亿元。项目采用EPC总承包形式，工期27个月，工作范围包括设计、设备供应、施工及试运行等。若合同顺利实施，将扩大公司经营规模，提升持续盈利能力，但具体财务影响尚无法测算。项目位于境外，存在政治、法律及外汇等海外经营风险。</p></article><article class="cls-item" data-id="2515491"><time datetime="2026-10-26T19:07:37+08:00">2026-10-26 19:07:37 北京时间</time><h3><a href="https://www.cls.cn/detail/2515491" target="_blank" rel="noopener noreferrer" data-manus_clickable="true" data-manus_click_id="27">财联社10月26日电，全球芯片LOF(501225)将于2026年10月27日开市起至当日10:30停牌。</a></h3><p>财联社10月26日电，全球芯片LOF(501225)将于2026年10月27日开市起至当日10:30停牌。</p></article><article class="cls-item" data-id="2515494"><time datetime="2026-10-26T19:07:36+08:00">2026-10-26 19:07:36 北京时间</time><h3><a href="https://www.cls.cn/detail/2515494" target="_blank" rel="noopener noreferrer" data-manus_clickable="true" data-manus_click_id="28">财联社10月26日电，纳指ETF富国(513870)将于2026年10月27日开市起至当日10:30停牌。</a></h3><p>财联社10月26日电，纳指ETF富国(513870)将于2026年10月27日开市起至当日10:30停牌。</p></article><article class="cls-item" data-id="2515490"><time datetime="2026-10-26T19:07:34+08:00">2026-10-26 19:07:34 北京时间</time><h3><a href="https://www.cls.cn/detail/2515490" target="_blank" rel="noopener noreferrer" data-manus_clickable="true" data-manus_click_id="29">财联社10月26日电，纳指100ETF博时(513390)将于2026年10月27日开市起至当日10:30停牌。</a></h3><p>财联社10月26日电，纳指100ETF博时(513390)将于2026年10月27日开市起至当日10:30停牌。</p></article><article class="cls-item" data-id="2515488"><time datetime="2026-10-26T19:07:31+08:00">2026-10-26 19:07:31 北京时间</time><h3><a href="https://www.cls.cn/detail/2515488" target="_blank" rel="noopener noreferrer" data-manus_clickable="true" data-manus_click_id="30">财联社10月26日电，纳斯达克ETF华夏(513300)将于2026年10月27日开市起至当日10:30停牌。</a></h3><p>财联社10月26日电，纳斯达克ETF华夏(513300)将于2026年10月27日开市起至当日10:30停牌。</p></article><article class="cls-item" data-id="2515486"><time datetime="2026-10-26T19:07:27+08:00">2026-10-26 19:07:27 北京时间</time><h3><a href="https://www.cls.cn/detail/2515486" target="_blank" rel="noopener noreferrer" data-manus_clickable="true" data-manus_click_id="31">财联社10月26日电，纳指ETF国泰(513100)将于2026年10月27日开市起至当日10:30停牌。</a></h3><p>财联社10月26日电，纳指ETF国泰(513100)将于2026年10月27日开市起至当日10:30停牌。</p></article><article class="cls-item" data-id="2515493"><time datetime="2026-10-26T19:07:17+08:00">2026-10-26 19:07:17 北京时间</time><h3><a href="https://www.cls.cn/detail/2515493" target="_blank" rel="noopener noreferrer" data-manus_clickable="true" data-manus_click_id="32">12306今日上线新功能 买团体票更方便</a></h3><p>【12306今日上线新功能 买团体票更方便】财联社10月26日电，铁路12306客户端（含网站）于10月26日起新增“团体票业务联系方式查询”功能。旅客可在铁路12306客户端“温馨服务”版块和网站“信息查询”版块，检索团体票办理车站、办公电话和营业时间。</p></article><article class="cls-item" data-id="2515489"><time datetime="2026-10-26T19:06:07+08:00">2026-10-26 19:06:07 北京时间</time><h3><a href="https://www.cls.cn/detail/2515489" target="_blank" rel="noopener noreferrer" data-manus_clickable="true" data-manus_click_id="33">双环传动：前三季度净利润同比增长2.40%</a></h3><p>【双环传动：前三季度净利润同比增长2.40%】财联社10月26日电，双环传动(002472.SZ)公告称，第三季度营业收入为25.59亿元，同比增长14.40%；归属于上市公司股东的净利润为3.33亿元，同比增长3.76%。前三季度实现营业收入71.18亿元，同比增长10.08%；归属于上市公司股东的净利润9.20亿元，同比增长2.40%。小财注：公司Q3净利润3.33亿，Q2净利润3.03亿，据此计算，Q3净利润环比增长10%。</p></article><article class="cls-item" data-id="2515485"><time datetime="2026-10-26T19:05:14+08:00">2026-10-26 19:05:14 北京时间</time><h3><a href="https://www.cls.cn/detail/2515485" target="_blank" rel="noopener noreferrer" data-manus_clickable="true" data-manus_click_id="34">财联社10月26日电，Truist Securities将微软目标价从575美元上调至600美元。</a></h3><p>财联社10月26日电，Truist Securities将微软目标价从575美元上调至600美元。</p></article><article class="cls-item" data-id="2515484"><time datetime="2026-10-26T19:04:51+08:00">2026-10-26 19:04:51 北京时间</time><h3><a href="https://www.cls.cn/detail/2515484" target="_blank" rel="noopener noreferrer" data-manus_clickable="true" data-manus_click_id="35">江苏省量子科技产业联盟在苏州成立</a></h3><p>【江苏省量子科技产业联盟在苏州成立】财联社10月26日电，江苏省量子科技产业联盟成立大会10月26日在苏州举行。此次揭牌成立的江苏省量子科技产业联盟由省科技厅指导、量子科技长三角产业创新中心牵头组建，将聚焦量子科技领域技术攻关、成果转化、产业协同的难点卡点，统筹开展资源对接、信息共享等工作，推动产业规范化、专业化、规模化发展。 （苏州发布）</p></article><article class="cls-item" data-id="2515483"><time datetime="2026-10-26T19:04:33+08:00">2026-10-26 19:04:33 北京时间</time><h3><a href="https://www.cls.cn/detail/2515483" target="_blank" rel="noopener noreferrer" data-manus_clickable="true" data-manus_click_id="36">国瓷材料：第三季度净利润1.83亿元 同比增长15.79%</a></h3><p>【国瓷材料：第三季度净利润1.83亿元 同比增长15.79%】财联社10月26日电，国瓷材料(300285.SZ)公告称，第三季度营业收入为15.66亿元，同比增长38.65%；净利润为1.83亿元，同比增长15.79%。前三季度营业收入为40.79亿元，同比增长24.21%；净利润为5.45亿元，同比增长11.43%。小财注：公司Q3净利润1.83亿，Q2净利润2.2亿，据此计算，Q3净利润环比下降17%。</p></article><article class="cls-item" data-id="2515482"><time datetime="2026-10-26T19:04:29+08:00">2026-10-26 19:04:29 北京时间</time><h3><a href="https://www.cls.cn/detail/2515482" target="_blank" rel="noopener noreferrer" data-manus_clickable="true" data-manus_click_id="37">财联社10月26日电，VERIZON美股盘前上涨3.5%，此前该公司上调了全年调整后每股收益预期。</a></h3><p>财联社10月26日电，VERIZON美股盘前上涨3.5%，此前该公司上调了全年调整后每股收益预期。</p></article><article class="cls-item" data-id="2515481"><time datetime="2026-10-26T19:03:46+08:00">2026-10-26 19:03:46 北京时间</time><h3><a href="https://www.cls.cn/detail/2515481" target="_blank" rel="noopener noreferrer" data-manus_clickable="true" data-manus_click_id="38">德龙汇能第三大股东刘鑫三季度增仓549.52万股</a></h3><p>【德龙汇能第三大股东刘鑫三季度增仓549.52万股】财联社10月26日电，德龙汇能(000593.SZ)发布2026年三季报显示，与2026年半年报相比，第三大股东刘鑫持仓增加549.52万股至1798.35万股，占总股本比例5.01%。小财注：前十大股东不排除重名情况。</p></article><article class="cls-item" data-id="2515480"><time datetime="2026-10-26T19:03:25+08:00">2026-10-26 19:03:25 北京时间</time><h3><a href="https://www.cls.cn/detail/2515480" target="_blank" rel="noopener noreferrer" data-manus_clickable="true" data-manus_click_id="39">Meta公司将通过普通股和优先股发行筹集约350亿美元资金</a></h3><p>【Meta公司将通过普通股和优先股发行筹集约350亿美元资金】财联社10月26日电，META将同时通过远期销售协议发行约225亿美元的A类普通股并发行约125亿美元的存托股份。META将发行最多2.5亿份A系列存托股份，英伟达、AMD、博通将购买最多50亿美元的A类股票。</p></article><article class="cls-item" data-id="2515471"><time datetime="2026-10-26T19:00:54+08:00">2026-10-26 19:00:54 北京时间</time><h3><a href="https://www.cls.cn/detail/2515471" target="_blank" rel="noopener noreferrer" data-manus_clickable="true" data-manus_click_id="40">财联社10月26日电，META可能出售最多600亿美元C类股票。</a></h3><p>财联社10月26日电，META可能出售最多600亿美元C类股票。</p></article><article class="cls-item" data-id="2515470"><time datetime="2026-10-26T19:00:50+08:00">2026-10-26 19:00:50 北京时间</time><h3><a href="https://www.cls.cn/detail/2515470" target="_blank" rel="noopener noreferrer" data-manus_clickable="true" data-manus_click_id="41">财联社10月26日电，威瑞森预计本财年调整后每股收益为5.04至5.06美元，此前预期为4.99至5.04美元。</a></h3><p>财联社10月26日电，威瑞森预计本财年调整后每股收益为5.04至5.06美元，此前预期为4.99至5.04美元。</p></article><article class="cls-item" data-id="2515466"><time datetime="2026-10-26T18:59:29+08:00">2026-10-26 18:59:29 北京时间</time><h3><a href="https://www.cls.cn/detail/2515466" target="_blank" rel="noopener noreferrer" data-manus_clickable="true" data-manus_click_id="42">事发多日 日本政府首次回应日企活动引发蒙古国草原火灾</a></h3><p>【事发多日 日本政府首次回应日企活动引发蒙古国草原火灾】财联社10月26日电，日本企业活动引发蒙古国自然保护区大规模草原火灾一事曝光多日后，日本内阁官房长官木原稔26日首次给予官方回应，称日本政府“严肃看待”火灾造成的严重损失。木原稔在记者会上表示，日本政府向蒙古国国民表示慰问，愿与蒙古国政府保持密切沟通，为受灾地区恢复工作提供协助。蒙古国东方省努姆鲁格自然保护区8日发生大规模草原火灾，据蒙古国方面消息，明火已于16日被扑灭。日本电信运营商凯迪迪爱公司20日承认，火灾与其子公司日本籍高管的活动有关。 （央视新闻）</p></article><article class="cls-item" data-id="2515465"><time datetime="2026-10-26T18:58:56+08:00">2026-10-26 18:58:56 北京时间</time><h3><a href="https://www.cls.cn/detail/2515465" target="_blank" rel="noopener noreferrer" data-manus_clickable="true" data-manus_click_id="43">云南铜业：前三季度净利润同比增长47.86%</a></h3><p>【云南铜业：前三季度净利润同比增长47.86%】财联社10月26日电，云南铜业(000878.SZ)公告称，第三季度营业收入为523.06亿元，同比增长10.60%；归属于上市公司股东的净利润为7.03亿元，同比增长143.77%。前三季度营业收入为1638.55亿元，同比增长24.78%；归属于上市公司股东的净利润为26.00亿元，同比增长47.86%。小财注：公司Q3净利润7.03亿，Q2净利润12.22亿，据此计算，Q3净利润环比下降42%。</p></article><article class="cls-item" data-id="2515464"><time datetime="2026-10-26T18:58:51+08:00">2026-10-26 18:58:51 北京时间</time><h3><a href="https://www.cls.cn/detail/2515464" target="_blank" rel="noopener noreferrer" data-manus_clickable="true" data-manus_click_id="44">财联社10月26日电，放话挑战诺兰三个月后，马斯克旗下Grok Imagine发布约7分钟的AI版《奥德赛》。</a></h3><p>财联社10月26日电，放话挑战诺兰三个月后，马斯克旗下Grok Imagine发布约7分钟的AI版《奥德赛》。</p></article></div>
+  <div class="cls-bottom"><button class="secondary" id="clsMore" type="button" data-manus_clickable="true" data-manus_click_id="45">加载更早电报</button><span class="small" id="clsCount">最近三天 · 已加载 20 条</span></div>
   <p class="hint">来源：财联社官方电报接口，经独立只读接口转发。时间均为北京时间，按发布时间倒序；更新可能受源站和网络影响，不保证零延迟。历史日期不自动轮询，切回最近三天或今天后恢复。</p>
 </section>
 <script>
 (() => {
   'use strict';
-  const API='https://8767-ij8jq9rmvhtw6m9dy95xp-9c8c966c.us2.manus.computer/api/cls-telegraph';
+  const API=location.origin+'/api/cls-telegraph';
   const el=id=>document.getElementById(id);
   const ui={date:el('clsDate'),recent:el('clsRecent'),refresh:el('clsRefresh'),auto:el('clsAuto'),status:el('clsStatus'),feed:el('clsFeed'),more:el('clsMore'),count:el('clsCount')};
   const data={date:'',rows:new Map(),cursor:null,generation:0,busy:false,controller:null,today:'',loaded:false};
@@ -180,7 +288,7 @@ main{max-width:1180px;margin:0 auto;padding:28px 20px 60px}.hero{display:flex;ju
     const controller=new AbortController();data.controller=controller;const timer=setTimeout(()=>controller.abort(),20000);
     try{
       const url=new URL(API);if(mode)url.searchParams.set('date',mode);if(isMore)url.searchParams.set('cursor',String(cursor));
-      const response=await fetch(url,{signal:controller.signal,cache:'no-store',credentials:'omit',referrerPolicy:'no-referrer'});
+      const response=await fetch(url,{signal:controller.signal,cache:'no-store',credentials:'same-origin',referrerPolicy:'no-referrer'});
       if(!response.ok)throw Error('服务暂不可用');const result=await response.json();
       if(generation!==data.generation)return;
       if(result.source!=='财联社'||!Array.isArray(result.items)||(result.date||'')!==mode)throw Error('数据格式异常');
@@ -230,15 +338,15 @@ main{max-width:1180px;margin:0 auto;padding:28px 20px 60px}.hero{display:flex;ju
 @media(max-width:520px){#thsUpcoming .ths-up-feed{max-height:540px}}
 </style>
 <section class="card" id="thsUpcoming" aria-labelledby="thsUpcomingTitle">
-  <div class="section-head" style="flex-wrap:wrap"><h2 id="thsUpcomingTitle">同花顺 · 热点大事预期</h2><div class="ths-up-tools"><span class="small">今天及未来 · 北京时间</span><button class="secondary" id="thsUpcomingRefresh" type="button">刷新大事预期</button></div></div>
+  <div class="section-head" style="flex-wrap:wrap"><h2 id="thsUpcomingTitle">同花顺 · 热点大事预期</h2><div class="ths-up-tools"><span class="small">今天及未来 · 北京时间</span><button class="secondary" id="thsUpcomingRefresh" type="button" data-manus_clickable="true" data-manus_click_id="46">刷新大事预期</button></div></div>
   <p class="hint">独立展示全市场即将发生的大事，不跟随股票筛选。按同花顺事件日期由近到远排列，仅保留今天及以后；相同日期、相同标题合并展示。日期及关联板块来自同花顺，预期安排可能调整，请以主办方正式信息为准。</p>
-  <p class="ths-up-status" id="thsUpcomingStatus" role="status" aria-live="polite">正在读取同花顺大事预期…</p>
-  <div class="ths-up-feed" id="thsUpcomingFeed" aria-label="今天及未来热点大事列表"></div>
+  <p class="ths-up-status" id="thsUpcomingStatus" role="status" aria-live="polite">共 16 条 · 仅 2026-10-26 及以后 · 源数据读取于 2026/10/26 19:08:44（北京时间） · 每 5 分钟检查更新</p>
+  <div class="ths-up-feed" id="thsUpcomingFeed" aria-label="今天及未来热点大事列表"><article class="ths-up-item" data-date="2026-10-26"><time datetime="2026-10-26" class="ths-up-date ths-up-today">2026-10-26 · 今天</time><h3>2026年全国镁行业大会暨镁业分会第二十九届年会于10月26日在上海召开</h3></article><article class="ths-up-item" data-date="2026-10-26"><time datetime="2026-10-26" class="ths-up-date ths-up-today">2026-10-26 · 今天</time><h3>2026中欧企业家青岛论坛将于10月26日至27日在青岛举办</h3></article><article class="ths-up-item" data-date="2026-10-26"><time datetime="2026-10-26" class="ths-up-date ths-up-today">2026-10-26 · 今天</time><h3>北交所：《北京证券交易所交易规则》第3.6.5条第二款和第三款关于无价格涨跌幅限制股票的大宗交易申报价格范围的规定，自10月26日起正式实施</h3></article><article class="ths-up-item" data-date="2026-10-26"><time datetime="2026-10-26" class="ths-up-date ths-up-today">2026-10-26 · 今天</time><h3>第二届一带一路国际先进材料大会（BRCAM 2026）将于10月26日至27日举办</h3><span class="ths-up-block">一带一路</span></article><article class="ths-up-item" data-date="2026-10-26"><time datetime="2026-10-26" class="ths-up-date ths-up-today">2026-10-26 · 今天</time><h3>上交所、中证指数有限公司修订上证系列综合指数编制方案，10月26日实施</h3></article><article class="ths-up-item" data-date="2026-10-26"><time datetime="2026-10-26" class="ths-up-date ths-up-today">2026-10-26 · 今天</time><h3>中国共产党第二十届中央委员会第五次全体会议于10月26日至29日在北京召开</h3></article><article class="ths-up-item" data-date="2026-10-26"><time datetime="2026-10-26" class="ths-up-date ths-up-today">2026-10-26 · 今天</time><h3>CPE2026国际算电展将于10月26日至28日举办</h3><span class="ths-up-block">东数西算(算力)</span></article><article class="ths-up-item" data-date="2026-10-27"><time datetime="2026-10-27" class="ths-up-date">2026-10-27 · 即将发生</time><h3>2026卫星应用大会将于10月27日至29日在上海举办</h3><span class="ths-up-block">卫星导航</span></article><article class="ths-up-item" data-date="2026-10-28"><time datetime="2026-10-28" class="ths-up-date">2026-10-28 · 即将发生</time><h3>苹果公司将于10月28日举行新品发布会，届时计划推出公司首款触屏MacBook</h3><span class="ths-up-block">苹果概念</span></article><article class="ths-up-item" data-date="2026-10-28"><time datetime="2026-10-28" class="ths-up-date">2026-10-28 · 即将发生</time><h3>SK海力士第三季度财务报告及法说会预计将于10月28日召开</h3><span class="ths-up-block">存储芯片</span></article><article class="ths-up-item" data-date="2026-10-29"><time datetime="2026-10-29" class="ths-up-date">2026-10-29 · 即将发生</time><h3>淡水河谷计划于10月29日同步披露第三季度业绩报告与产量数据</h3></article><article class="ths-up-item" data-date="2026-10-29"><time datetime="2026-10-29" class="ths-up-date">2026-10-29 · 即将发生</time><h3>欧加峰会定于10月29日至30日在蒙特利尔举行，峰会将敲定双方未来关系的具体框架</h3></article><article class="ths-up-item" data-date="2026-10-29"><time datetime="2026-10-29" class="ths-up-date">2026-10-29 · 即将发生</time><h3>三星电子将于10月29日举行第三季度财报电话会议</h3><span class="ths-up-block">存储芯片</span></article><article class="ths-up-item" data-date="2026-10-30"><time datetime="2026-10-30" class="ths-up-date">2026-10-30 · 即将发生</time><h3>2026工业数据要素大会将于10月30日在广西举行</h3><span class="ths-up-block">数据要素</span></article><article class="ths-up-item" data-date="2026-10-30"><time datetime="2026-10-30" class="ths-up-date">2026-10-30 · 即将发生</time><h3>2026榆林羊产业大会暨第二届中国·榆林羊产业博览会将于10月30日至11月1日举办</h3><span class="ths-up-block">生态农业</span></article><article class="ths-up-item" data-date="2026-10-30"><time datetime="2026-10-30" class="ths-up-date">2026-10-30 · 即将发生</time><h3>第五届地方猪资源保护与开发利用大会将于10月30日在湘潭召开</h3><span class="ths-up-block">猪肉</span></article></div>
 </section>
 <script>
 (()=>{
   'use strict';
-  const API='https://8768-ij8jq9rmvhtw6m9dy95xp-9c8c966c.us2.manus.computer/api/ths-events';
+  const API=location.origin+'/api/ths-events';
   const byId=id=>document.getElementById(id),feed=byId('thsUpcomingFeed'),status=byId('thsUpcomingStatus'),refresh=byId('thsUpcomingRefresh');
   const dateFormat=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'});
   const today=()=>{const parts=dateFormat.formatToParts(new Date()),p=Object.fromEntries(parts.map(v=>[v.type,v.value]));return `${p.year}-${p.month}-${p.day}`;};
@@ -272,7 +380,7 @@ main{max-width:1180px;margin:0 auto;padding:28px 20px 60px}.hero{display:flex;ju
     if(busy)return;busy=true;refresh.disabled=true;status.classList.remove('error');status.textContent='正在读取同花顺大事预期…';
     const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),35000);
     try{
-      const response=await fetch(API,{cache:'no-store',credentials:'omit',signal:controller.signal});
+      const response=await fetch(API,{cache:'no-store',credentials:'same-origin',signal:controller.signal});
       if(!response.ok)throw Error('unavailable');const data=await response.json();
       if(data.source!=='同花顺'||!Array.isArray(data.items)||!data.fetched_at||isNaN(new Date(data.fetched_at)))throw Error('invalid');
       rows=filtered(data.items,today());readAt=new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}).format(new Date(data.fetched_at));loaded=true;lastFetch=Date.now();render();
@@ -291,6 +399,7 @@ main{max-width:1180px;margin:0 auto;padding:28px 20px 60px}.hero{display:flex;ju
 </main>
 <script>
 'use strict';
+const localStorage=window.StableRecords.storage;
 const TX_KLINE='https://proxy.finance.qq.com/ifzqgtimg/appstock/app/newfqkline/get';
 const TX_QUOTE='https://qt.gtimg.cn/q=';
 const EM_SUGGEST='https://searchapi.eastmoney.com/api/suggest/get';
@@ -307,20 +416,36 @@ let state={code:'',symbol:'',name:'',rows:[],dailyByDate:{},chart:[],intradayByD
 let refreshInFlight=false,hoveredPointTime=null,pinnedPointTime=null;
 const $=id=>document.getElementById(id);
 function readStockHistory(){try{const items=JSON.parse(localStorage.getItem(STOCK_HISTORY_KEY)||'[]');return Array.isArray(items)?items.filter(x=>x&&typeof x.code==='string').slice(0,20):[];}catch{return [];}}
-function renderStockHistory(){const select=$('historySelect'),items=readStockHistory();select.replaceChildren();const first=document.createElement('option');first.value='';first.textContent='选择最近输入的股票…';select.appendChild(first);for(const item of items){const option=document.createElement('option');option.value=item.code;option.textContent=`${item.code}｜${item.name||item.query||item.code}${item.query&&item.query!==item.code&&item.query!==item.name?`（输入：${item.query}）`:''}`;select.appendChild(option);}$('clearHistoryBtn').disabled=!items.length;}
+function renderStockHistory(){const select=$('historySelect'),items=readStockHistory();select.replaceChildren();const first=document.createElement('option');first.value='';first.textContent=items.length?'选择最近输入的股票…':'暂无股票历史记录';select.appendChild(first);for(const item of items){const option=document.createElement('option');option.value=item.code;option.textContent=`${item.code}｜${item.name||item.query||item.code}${item.query&&item.query!==item.code&&item.query!==item.name?`（输入：${item.query}）`:''}`;select.appendChild(option);}$('clearHistoryBtn').disabled=!items.length;}
 function saveStockHistory(query,code,name){try{const item={query:String(query||'').trim(),code:String(code),name:String(name||code)};const items=[item,...readStockHistory().filter(x=>x.code!==item.code)].slice(0,20);localStorage.setItem(STOCK_HISTORY_KEY,JSON.stringify(items));renderStockHistory();}catch{}}
 function setStatus(text,type=''){const e=$('status');e.textContent=text;e.className=type;}
-function dayShanghai(){return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());}
+function dayShanghai(){return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(marketNow());}
 function shanghaiClock(){const parts=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Shanghai',weekday:'short',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(new Date());const v={};for(const p of parts)v[p.type]=p.value;return {weekday:v.weekday,hour:+v.hour,minute:+v.minute,second:+v.second};}
 function isTradingSession(){return marketPhase().open;}
-function isTradingDayWindow(){const phase=marketPhase(),m=shanghaiClock().hour*60+shanghaiClock().minute;return phase.open||(phase.label==='午间休市'&&m<900);}
+function isTradingDayWindow(){const phase=marketPhase();return phase.open||phase.kind==='lunch';}
 function marketSymbol(code){if(/^(600|601|603|605|688|689)/.test(code))return 'sh'+code;if(/^(000|001|002|003|300|301)/.test(code))return 'sz'+code;if(/^(430|831|832|833|834|835|836|837|838|839|870|871|872|873)/.test(code))return 'bj'+code;throw new Error('无法判断股票市场，请输入 6 位沪深北交所股票代码');}
 function scriptValue(url,globalName,timeout=20000){return new Promise((resolve,reject)=>{const s=document.createElement('script');let done=false;const timer=setTimeout(()=>finish(new Error('行情接口请求超时')),timeout);function finish(err){if(done)return;done=true;clearTimeout(timer);s.remove();err?reject(err):resolve(window[globalName]);}s.async=true;s.src=url;s.onload=()=>{if(window[globalName]===undefined)finish(new Error('接口返回数据为空'));else finish(null);};s.onerror=()=>finish(new Error('无法加载行情接口'));document.head.appendChild(s);});}
-function jsonp(url,paramName='cb',timeout=20000){return new Promise((resolve,reject)=>{const cb='__stockJsonp_'+Date.now()+'_'+Math.random().toString(36).slice(2);const join=url.includes('?')?'&':'?';const s=document.createElement('script');let done=false;const timer=setTimeout(()=>finish(new Error('接口请求超时')),timeout);function cleanup(){delete window[cb];s.remove();clearTimeout(timer);}function finish(err,value){if(done)return;done=true;cleanup();err?reject(err):resolve(value);}window[cb]=data=>finish(null,data);s.async=true;s.onerror=()=>finish(new Error('无法加载东方财富接口'));s.src=url+join+encodeURIComponent(paramName)+'='+encodeURIComponent(cb);document.head.appendChild(s);});}
-async function rawQuote(symbol){const raw=await scriptValue(TX_QUOTE+encodeURIComponent(symbol),'v_'+symbol);const f=String(raw).split('~');if(f.length<38)throw new Error('腾讯实时行情字段不足');return {fields:f,name:f[1],current:+f[3],prev_close:+f[4],open:+f[5],volume_raw:+f[6],change_pct:+f[32],high:+f[33],low:+f[34],amount_wan:+f[37],float_market_cap_yi:Number(f[44]),time:f[30]};}
+function jsonp(url,paramName='cb',timeout=20000){return new Promise((resolve,reject)=>{const cb='__stockJsonp_'+Date.now()+'_'+Math.random().toString(36).slice(2);const join=url.includes('?')?'&':'?';const s=document.createElement('script');let done=false;const timer=setTimeout(()=>finish(new Error('接口请求超时')),timeout);function cleanup(){delete window[cb];s.remove();clearTimeout(timer);}function finish(err,value){if(done)return;done=true;cleanup();err?reject(err):resolve(value);}window[cb]=data=>finish(null,data);s.async=true;if(url.startsWith(EM_MINUTE_API))s.referrerPolicy='no-referrer';s.onerror=()=>finish(new Error('无法加载东方财富接口'));s.src=url+join+encodeURIComponent(paramName)+'='+encodeURIComponent(cb);document.head.appendChild(s);});}
+async function rawQuote(symbol,allowClosed=false){if(!allowClosed&&!marketPhase().open){const error=Error(marketPhase().label+'，自动实时快照已暂停');error.closed=true;throw error;}const raw=await scriptValue(TX_QUOTE+encodeURIComponent(symbol),'v_'+symbol);const f=String(raw).split('~');if(f.length<38)throw new Error('腾讯实时行情字段不足');return {fields:f,name:f[1],current:+f[3],prev_close:+f[4],open:+f[5],volume_raw:+f[6],change_pct:+f[32],high:+f[33],low:+f[34],amount_wan:+f[37],float_market_cap_yi:Number(f[44]),time:f[30]};}
 async function suggest(query){const u=new URL(EM_SUGGEST);u.searchParams.set('input',query);u.searchParams.set('type','14');u.searchParams.set('token',EM_TOKEN);const data=await jsonp(u.toString());return (data?.QuotationCodeTable?.Data||[]).filter(x=>x.Classify==='AStock');}
-async function resolveCode(query){const m=query.match(/(?<!\d)(\d{6})(?!\d)/);if(m)return m[1];const list=await suggest(query);if(!list.length)throw new Error('没有找到对应的股票名称');if(list.length===1)return list[0].Code;const choices=list.slice(0,20).map((x,i)=>`${i+1}. ${x.Code} ${x.Name}`).join('\n');const answer=prompt('找到多个结果，请输入序号：\n'+choices,'1');if(answer===null)throw new Error('已取消选择');const i=Number(answer)-1;if(!Number.isInteger(i)||i<0||i>=Math.min(list.length,20))throw new Error('选择序号无效');return list[i].Code;}
-async function fetchOneYear(symbol,year){const u=new URL(TX_KLINE);u.searchParams.set('_var','kline_day'+year);u.searchParams.set('param',`${symbol},day,${year}-01-01,${year+1}-12-31,640,`);u.searchParams.set('r',String(Math.random()));const payload=await scriptValue(u.toString(),'kline_day'+year);const rows=payload?.data?.[symbol]?.day||[];if(!rows.length)throw new Error(`${symbol} 没有返回日线数据`);return rows;}
+async function resolveCode(query){
+  const m=query.match(/(?<!\d)(\d{6})(?!\d)/);
+  if(m){
+    let list=[];
+    try{list=await suggest(m[1]);}catch{}
+    const exact=list.find(x=>String(x.Code)===m[1]&&String(x.Name||'').trim());
+    return {code:m[1],name:exact?String(exact.Name).trim():''};
+  }
+  const list=await suggest(query);
+  if(!list.length)throw new Error('没有找到对应的股票名称');
+  if(list.length===1)return {code:list[0].Code,name:String(list[0].Name||'').trim()};
+  const choices=list.slice(0,20).map((x,i)=>`${i+1}. ${x.Code} ${x.Name}`).join('\n');
+  const answer=prompt('找到多个结果，请输入序号：\n'+choices,'1');
+  if(answer===null)throw new Error('已取消选择');
+  const i=Number(answer)-1;
+  if(!Number.isInteger(i)||i<0||i>=Math.min(list.length,20))throw new Error('选择序号无效');
+  return {code:list[i].Code,name:String(list[i].Name||'').trim()};
+} async function fetchOneYear(symbol,year){const u=new URL(TX_KLINE);u.searchParams.set('_var','kline_day'+year);u.searchParams.set('param',`${symbol},day,${year}-01-01,${year+1}-12-31,640,`);u.searchParams.set('r',String(Math.random()));const payload=await scriptValue(u.toString(),'kline_day'+year);const rows=payload?.data?.[symbol]?.day||[];if(!rows.length)throw new Error(`${symbol} 没有返回日线数据`);return rows;}
 function volumeToHand(raw,symbol,low,high,amount){let hands=+raw;let unit='手';if(['sh688','sh000','sz399'].some(x=>symbol.startsWith(x))){hands/=100;unit='股→手';}if(!(hands>0))throw new Error('成交量异常：'+symbol);const vwap=amount*100/hands;if(!(vwap>=low-.02&&vwap<=high+.02))throw new Error(`成交量单位校验失败：${symbol}，VWAP=${vwap.toFixed(4)}不在当日区间内`);return {hands,vwap,unit};}
 async function fetchHistory(symbol,start,end){
   const years=[];for(let y=Number(start.slice(0,4));y<=Number(end.slice(0,4));y++)years.push(y);
@@ -415,7 +540,7 @@ async function ensureChartReference(day){
   try{const rows=await fetchHistory(symbol,start,day);if(state.symbol===symbol){for(const row of rows){if(row.prev_close>0||!state.dailyByDate[row.date])state.dailyByDate[row.date]=row;}(state.dailyHistoryRanges??=[]).push([start,day]);}}catch(e){console.warn('所选日期昨收价暂不可用',e);}
 }
 async function loadSelectedChartDay(){
-  const day=$('chartDate').value;if(!day||!state.code)return;tickDateBegin(day);
+  const day=$('chartDate').value;if(!day||!state.code)return;await StableRecords.loadStockCaches(state.code,day);tickDateBegin(day);
   const symbol=state.symbol;await ensureChartReference(day);if(symbol!==state.symbol||$('chartDate').value!==day)return;
   if(!state.intradayByDate[day]){setStatus(`正在查询 ${day} 的历史分钟线…`);try{const bars=await fetchMinuteBars(state.symbol,'5',day.replaceAll('-',''),day.replaceAll('-',''));const sameDay=bars.filter(p=>p.time.slice(0,10)===day);if(sameDay.length)state.intradayByDate[day]=sameDay;}catch(e){console.warn('历史分钟线不可用',e);setChartDay(day);setStatus(`分钟线加载失败：${e.message}；请稍后重试。`,'error');return;}}
   setChartDay(day);setStatus(state.chart.length?`${day} 的历史分时已加载，共 ${state.chart.length} 个点。`:`${day} 没有可用历史分钟数据；这一天可能超出接口保留范围。`,state.chart.length?'ok':'');
@@ -579,7 +704,7 @@ async function fetchStockBoardReport(symbol,reportName){
   const u=new URL('https://datacenter.eastmoney.com/securities/api/data/v1/get');for(const [k,v]of Object.entries({reportName,columns:'ALL',filter:`(SECUCODE="${symbol.slice(2)}.${market}")`,pageSize:'200',pageNumber:'1',source:'HSF10',client:'PC',sortColumns:reportName==='RPT_F10_CORETHEME_BOARDTYPE'?'BOARD_RANK':'SECUCODE',sortTypes:'1'}))u.searchParams.set(k,v);
   const data=await jsonp(u.toString(),'callback',12000);if(!data?.success||!Array.isArray(data?.result?.data))throw new Error('板块接口暂未返回数据');return data.result.data;
 }
-function updateStockMarketCap(q){const cap=Number(q?.float_market_cap_yi);$('stockFloatCap').textContent='流通市值：'+(Number.isFinite(cap)&&cap>0?cap.toFixed(2)+'亿元':'暂未获取到');$('stockFloatCap').title='来源：腾讯最新行情（非历史市值）'+(q?.time?'；快照时间：'+quoteBeijing(q.time):'');}
+function updateStockMarketCap(q){const cap=Number(q?.float_market_cap_yi);$('stockFloatCap').textContent='流通市值：'+(Number.isFinite(cap)&&cap>0?cap.toFixed(2)+'亿元':'暂未获取到');$('stockFloatCap').title='来源：腾讯最新行情（非历史市值）';}
 async function loadStockBoards(symbol){
   const request={};state.boardRequest=request;$('stockIndustry').textContent='所属行业：加载中…';$('stockTags').textContent='板块 / 标签：加载中…';
   const results=await Promise.allSettled([fetchStockBoardReport(symbol,'RPT_F10_ORG_BASICINFO'),fetchStockBoardReport(symbol,'RPT_F10_CORETHEME_BOARDTYPE')]);if(state.symbol!==symbol||state.boardRequest!==request)return;
@@ -600,7 +725,7 @@ function downloadCSV(){const fields=['date','open','high','low','close','volume_
 function stopTimer(){if(state.timer){clearInterval(state.timer);state.timer=null;}}
 async function refreshQuote(){
   if(!state.symbol||refreshInFlight)return;
-  if(!isTradingSession()){if(state.quote)upsertTodayRow(state.quote);if(isTradingDayWindow())setStatus('午间休市中，下午开市后将继续采样。');else{setStatus('当前不在 A 股交易时段；页面仍可查看已采样的当日曲线。');stopTimer();}return;}
+  if(!isTradingSession()){if(state.quote)upsertTodayRow(state.quote);if(isTradingDayWindow())setStatus('午间休市中，下午开市后将继续采样。');else{setStatus(marketPhase().label+'，自动实时快照已暂停；仍可查看已存曲线。');stopTimer();}return;}
   refreshInFlight=true;const symbol=state.symbol;
   try{const q=await rawQuote(symbol);if(symbol!==state.symbol)return;updateStockMarketCap(q);if(!addPoint(q)){setStatus('收到的行情快照不是今天的数据；暂未添加到当日走势图。','error');return;}setStatus(`实时行情已更新：${quoteBeijing(q.time)}，当前共 ${state.chart.length} 个点。`,'ok');}
   catch(e){setStatus(`实时行情暂时不可用：${e.message}；下一轮会重试。`,'error');}
@@ -610,8 +735,8 @@ async function runQuery(event){
   event?.preventDefault();const recordingStartedAt=new Date().toISOString();tickReset();stopTimer();const query=$('query').value.trim();if(!query)return;
   clearChartSelection();$('stockFloatCap').textContent='流通市值：加载中…';state={code:'',symbol:'',name:'',rows:[],dailyByDate:{},chart:[],intradayByDate:{},chartDate:'',quote:null,news:[],anns:[],timer:null,report:''};let minuteError='';$('result').hidden=false;$('csvBtn').disabled=true;$('mdBtn').disabled=true;setStatus('正在解析股票并获取行情数据…');
   try{
-    const code=await resolveCode(query),symbol=marketSymbol(code);state.code=code;state.symbol=symbol;state.chartDate=$('end').value&&$('end').value<dayShanghai()?$('end').value:dayShanghai();await bookRecorder.begin(code,recordingStartedAt);void loadStockBoards(symbol);let q=null;
-    try{q=await rawQuote(symbol);state.name=q.name||code;state.quote=q;}catch(e){state.name=code;console.warn('获取实时快照失败',e);}updateStockMarketCap(q);saveStockHistory(query,code,state.name);watchlist.updateName(code,state.name);watchlist.render();
+    const resolved=await resolveCode(query),code=resolved.code,symbol=marketSymbol(code);state.code=code;state.symbol=symbol;await StableRecords.loadStockCaches(code,$('end').value&&$('end').value<dayShanghai()?$('end').value:dayShanghai());state.chartDate=$('end').value&&$('end').value<dayShanghai()?$('end').value:dayShanghai();await bookRecorder.begin(code,recordingStartedAt);void loadStockBoards(symbol);let q=null;
+    try{q=await rawQuote(symbol,true);state.name=q.name||resolved.name||watchlist.nameFor(code)||code;if(marketPhase().open)state.quote=q;}catch(e){state.name=resolved.name||watchlist.nameFor(code)||code;console.warn('获取实时快照失败',e);}updateStockMarketCap(q);saveStockHistory(query,code,state.name);watchlist.updateName(code,state.name);watchlist.render();
     const now=dayShanghai(),from=$('start').value,to=$('end').value;
     const start=from||new Date(Date.now()-120*86400000).toISOString().slice(0,10),end=to||now;
     const calcStart=new Date(new Date(start+'T00:00:00').getTime()-20*86400000).toISOString().slice(0,10);
@@ -630,7 +755,7 @@ async function runQuery(event){
     $('stockTitle').textContent=`${state.name}（${code}）`;$('thsdkStockLabel').textContent=`${state.name}（${code}）`;$('tradeDate').textContent=`当前日期：${now}（北京时间）`;$('rangeLabel').textContent=`${state.rows[0]?.date||start} 至 ${state.rows.at(-1)?.date||end}`;$('chartDate').max=now;$('chartDate').value=chartDefaultDay;
     await loadSelectedChartDay();tickStart();if(chartDefaultDay===now){if(hasTodayQuote)addPoint(q);else updateQuoteHeader();}renderTable();$('csvBtn').disabled=false;$('mdBtn').disabled=false;setStatus('日线行情已加载；走势图日期与所选范围同步，可在日期框中切换。','ok');
     if(!$('noNews').checked){$('newsList').innerHTML='<li class="empty">正在加载新闻…</li>';$('annList').innerHTML='<li class="empty">正在加载公告…</li>';const tasks=await Promise.allSettled([fetchNews(code,20),fetchAnnouncements(code,50)]);state.news=tasks[0].status==='fulfilled'?tasks[0].value:[];state.anns=tasks[1].status==='fulfilled'?tasks[1].value:[];state.annError=tasks[1].status==='rejected';renderNews();if(tasks.some(x=>x.status==='rejected'))setStatus('行情已加载；新闻或公告接口暂时不可用，可稍后重试。','');}else renderNews();
-    state.report=makeReport();if(isTradingDayWindow()){const secs=Math.max(1,Math.min(600,Number($('interval').value)||1));state.timer=setInterval(refreshQuote,secs*1000);if(isTradingSession())setStatus(`页面保持打开时会自动采样实时行情，间隔 ${secs} 秒。`,'ok');}else setStatus('行情与报告已加载；可查看数据源提供的近期分时，非交易时段不再实时采样。','');if(!state.chart.some(p=>!p.isLive))setStatus(minuteError?`日线已加载，但分钟线加载失败：${minuteError}；本机缓存不会跨设备同步，请稍后重试。`:'所选日期暂无可用分钟线，可能是休市日或超出数据源保留范围。',minuteError?'error':'');
+    state.report=makeReport();if(isTradingDayWindow()){const secs=Math.max(1,Math.min(600,Number($('interval').value)||1));state.timer=setInterval(refreshQuote,secs*1000);if(isTradingSession())setStatus(`页面保持打开时会自动采样实时行情，间隔 ${secs} 秒。`,'ok');}else setStatus(marketPhase().label+'；自动实时快照已暂停，可查看已存记录与近期历史分时。','');if(!state.chart.some(p=>!p.isLive))setStatus(minuteError?`日线已加载，但分钟线加载失败：${minuteError}；本机缓存不会跨设备同步，请稍后重试。`:'所选日期暂无可用分钟线，可能是休市日或超出数据源保留范围。',minuteError?'error':'');if(!marketPhase().open)setStatus(marketPhase().label+'，自动实时快照已暂停；已存记录仍可查看。'+(minuteError?' 历史分钟线暂不可用：'+minuteError:''));
   }catch(e){setStatus('查询失败：'+e.message,'error');console.error(e);}
 }
 
@@ -640,16 +765,36 @@ async function runQuery(event){
 // https://www.sse.com.cn/disclosure/announcement/general/c/c_20251222_10802507.shtml
 const MARKET_CALENDAR_YEAR='2026';
 const MARKET_CLOSURES=[['01-01','01-03'],['02-15','02-23'],['04-04','04-06'],['05-01','05-05'],['06-19','06-21'],['09-25','09-27'],['10-01','10-07']];
-function marketPhase(at=new Date()){
+let marketClockAnchor=null;
+function marketNow(){return marketClockAnchor?new Date(marketClockAnchor.time+performance.now()-marketClockAnchor.mono):new Date();}
+function marketPhase(at=marketNow()){
   const parts=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',weekday:'short',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(at),v={};for(const p of parts)v[p.type]=p.value;
   const day=`${v.year}-${v.month}-${v.day}`,md=`${v.month}-${v.day}`,m=Number(v.hour)*60+Number(v.minute);
-  if(v.year!==MARKET_CALENDAR_YEAR)return {open:false,label:'该年份交易日历尚未核验，自动取数暂停',day};
-  if(['Sat','Sun'].includes(v.weekday)||MARKET_CLOSURES.some(([a,b])=>md>=a&&md<=b))return {open:false,label:'休市日',day};
-  if((m>=570&&m<690)||(m>=780&&m<900))return {open:true,label:m>=897?'收盘集合竞价（普通五档不代表虚拟撮合行情）':'交易时段',day};
-  return {open:false,label:m>=690&&m<780?'午间休市':m>=555&&m<570?'开盘集合竞价，09:30开始普通逐笔自动读取':m>=900?'已收盘':'尚未开盘',day};
+  const phase=(kind,label,open=false)=>({kind,open,label,day});
+  if(v.year!==MARKET_CALENDAR_YEAR)return phase('calendar_unknown','交易日历待确认，自动取数暂停');
+  if(MARKET_CLOSURES.some(([a,b])=>md>=a&&md<=b))return phase('holiday','节假日休市');
+  if(['Sat','Sun'].includes(v.weekday))return phase('weekend','周末休市');
+  if(m<555)return phase('preopen','盘前未开市');
+  if(m<565)return phase('opening_auction','开盘集合竞价',true);
+  if(m<570)return phase('auction_wait','等待开市');
+  if(m<690)return phase('morning','上午交易',true);
+  if(m<780)return phase('lunch','午间休市');
+  if(m<897)return phase('afternoon','下午交易',true);
+  if(m<900)return phase('closing_auction','收盘集合竞价',true);
+  return phase('closed','收盘休市');
 }
 
-const THSDK_TICK_API='https://8766-ij8jq9rmvhtw6m9dy95xp-9c8c966c.us2.manus.computer/api/ticks';
+const THSDK_TICK_API=location.origin+'/api/ticks';
+let displayedMarketKind=marketPhase().kind;
+setInterval(()=>{
+  const phase=marketPhase();if(phase.kind===displayedMarketKind)return;displayedMarketKind=phase.kind;
+  if(!phase.open){
+    stopTimer();clearTimeout(tickState.debounce);tickState.controller?.abort();depthStop();
+    if(state.code){setStatus(phase.label+'，自动实时快照已暂停；已存记录仍可查看。');if(tickState.viewRows.length)$('thsdkStatus').textContent=tickSummary({rows:tickState.viewRows});else $('thsdkStatus').textContent=phase.label+'，暂无当前视图已存成交；不自动访问行情源。';depthShow();}
+  }
+  if(state.code)void bookRecorder.reloadServerRecords();
+},1000);
+
 // 请求失败按资源退避；五档故障不阻断逐笔，不把旧响应冒充新采样。
 const thsdkReadHealth=new Map();
 function thsdkReadUntil(url){return thsdkReadHealth.get(String(url))?.until||0;}
@@ -661,14 +806,18 @@ function thsdkRetryAfter(response){
   const seconds=Number(text),ms=Number.isFinite(seconds)?seconds*1000:Date.parse(text)-Date.now();
   return Number.isFinite(ms)?Math.max(0,Math.min(300000,ms)):0;
 }
-async function thsdkRead(url,signal){
+async function thsdkRead(url,signal,explicit=false){
+  // A clock/key/date change is not a manual request. Closed auto paths never reach source_read.
+  if(!explicit&&!marketPhase().open&&['/api/depth','/api/ticks'].includes(new URL(url,location.origin).pathname)){
+    const error=Error('休市，自动行情读取已暂停；保留服务器已存记录。');error.closed=true;throw error;
+  }
   const key=String(url),now=Date.now(),previous=thsdkReadHealth.get(key);
   if(signal?.aborted)throw signal.reason||new DOMException('Aborted','AbortError');
   if(thsdkReadUntil(key)>now){const error=Error((previous?.reason||'数据源暂缓读取')+`；等待 ${Math.ceil((thsdkReadUntil(key)-now)/1000)} 秒后重试`);error.cooldown=true;throw error;}
   let response,data;
   const started=Date.now(),resource=new URL(key).pathname+new URL(key).search;
   try{
-    response=await fetch(key,{cache:'no-store',signal,credentials:'omit'});
+    response=await fetch(key,{cache:'no-store',signal,credentials:'same-origin'});
     try{data=await response.json();}catch{if(response.ok)throw Error('行情接口未返回有效 JSON');data={};}
     if(!response.ok||data.error){
       const reasons={rate_limited:'中转接口限流',source_rate_limited:'数据源限流',source_encode_failed:'数据源编码失败',source_window_mismatch:'数据源返回股票或时间窗口不匹配',relay_busy:'中转服务繁忙',data_source_unavailable:'数据源暂不可用'};
@@ -690,7 +839,7 @@ function tickSourceTime(value){const date=new Date(value);if(!Number.isFinite(da
 function tickClock(value){return typeof value==='number'&&value>=1500000000&&value<=2200000000?tickSourceTime(value*1000):'';}
 function tickText(value){return value==null?'—':String(value);}
 function tickLots(value){if(value==null||String(value).trim()==='')return '—';const shares=Number(value);return Number.isFinite(shares)?String(shares/100):'—';}
-const tickState={enabled:false,timer:null,debounce:null,controller:null,key:'',generation:0,cache:new Map(),latestCache:new Map(),loadingDay:'',signature:'',viewRows:[],failureKey:'',lastSuccessAt:0};
+const tickState={enabled:false,timer:null,debounce:null,controller:null,key:'',generation:0,cache:new Map(),latestCache:new Map(),storedChecks:new Set(),emptySavedDays:new Set(),loadingDay:'',signature:'',viewRows:[],failureKey:'',lastSuccessAt:0};
 const tickReturnedCounts=new Map();
 function tickCountTotalText(rawRows=[]){
   const rows=[...rawRows].sort((a,b)=>(Number(b.time)||0)-(Number(a.time)||0));
@@ -698,10 +847,24 @@ function tickCountTotalText(rawRows=[]){
   const row=rows.find(r=>(!tickRowBeijingDay(r)||tickRowBeijingDay(r)===day)&&tickCountNumber(r.transaction_count)!==null);
   if(row){const time=Number(row.time)||0,previous=tickReturnedCounts.get(key);if(!previous||time>=previous.time)tickReturnedCounts.set(key,{count:tickCountNumber(row.transaction_count),time});}
   const latest=tickReturnedCounts.get(key);
-  return latest?`${row===rows[0]&&latest.time===(Number(row?.time)||0)?'累计成交':'最新可用累计成交'} ${latest.count.toLocaleString('zh-CN')} 笔`:'累计成交 —笔';
+  return latest?`${row===rows[0]&&latest.time===(Number(row?.time)||0)?'累计成交笔数':'最新可用累计成交笔数'} ${latest.count.toLocaleString('zh-CN')} 笔`:'累计成交笔数 — 笔';
 }
+// Display aggregate only; reuse the existing multiset fingerprint merge so repeated
+// responses do not double count, while identical records present twice stay distinct.
+const tickSummaryVolumeRows=new Map();
 function tickLoadedSummary(rows=[]){
-  $('thsdkLoadedSummary').textContent=tickCountTotalText(rows);
+  const countText=tickCountTotalText(rows);
+  const ordered=[...rows].sort((a,b)=>(Number(b.time)||0)-(Number(a.time)||0));
+  const day=(ordered.length?tickRowBeijingDay(ordered[0]):'')||state.chartDate||dayShanghai(),key=`${state.code}|${day}`;
+  const sameDay=rows.filter(r=>tickRowBeijingDay(r)===day);
+  const merged=tickMergeRows(tickSummaryVolumeRows.get(key)||[],tickMergeRows(tickLatestRows(state.code,day),sameDay));
+  if(merged.length)tickSummaryVolumeRows.set(key,merged);
+  const through=tickReturnedCounts.get(key)?.time??Infinity;
+  const included=merged.filter(r=>Number(r.time)<=through);
+  let shares=0,known=included.length>0;
+  for(const row of included){const value=row.volume;if(value==null||typeof value==='boolean'||String(value).trim()===''||!Number.isFinite(Number(value))||Number(value)<0){known=false;break;}shares+=Number(value);}
+  const lots=known?Number((shares/100).toFixed(8)).toLocaleString('zh-CN',{maximumFractionDigits:8}):'—';
+  return `累计成交手数 ${lots} 手｜${countText}`;
 }
 function tickRowStats(rawRows=[],counts=tickCountRows(rawRows).counts){
   const number=value=>value==null||typeof value==='boolean'||String(value).trim()===''?NaN:Number(value);
@@ -724,7 +887,7 @@ function tickRenderRowStats(rows=[],counts){
 function tickClear(){ $('thsdkTickHead').replaceChildren();$('thsdkTickBody').replaceChildren();$('thsdkTableWrap').hidden=true;tickLoadedSummary();tickRenderRowStats(); }
 function tickStop(){bookRecorder.pause();depthStop();tickState.enabled=false;clearInterval(tickState.timer);clearTimeout(tickState.debounce);tickState.controller?.abort();tickState.controller=null;tickState.generation++;$('thsdkStatus').textContent='已停止自动刷新，保留当前数据。';}
 function tickReset(){tickStop();tickState.key='';tickState.cache.clear();tickState.loadingDay='';tickState.viewRows=[];tickClear();depthReset();$('thsdkStockLabel').textContent='正在查询…';$('thsdkStatus').textContent='等待加载成交明细。';}
-function tickStart(force=true){tickState.enabled=true;clearInterval(tickState.timer);const ms=Math.max(1,Math.min(600,Number($('interval').value)||1))*1000;tickState.timer=setInterval(()=>{if(!marketPhase().open)return;if(!state.timer)void refreshQuote();if(!hoveredPointTime&&(!state.chartDate||state.chartDate===dayShanghai()))tickSync(true);},ms);tickSync(Boolean(force),true);}
+function tickStart(force=true){tickState.enabled=true;clearInterval(tickState.timer);const ms=Math.max(1,Math.min(600,Number($('interval').value)||1))*1000;tickState.timer=setInterval(()=>{if(!marketPhase().open)return;if(!state.timer)void refreshQuote();if(!hoveredPointTime&&(!state.chartDate||state.chartDate===dayShanghai()))tickSync(true);},ms);tickSync(Boolean(force),false);}
 function tickQuery(){
   if(!/^\d{6}$/.test(state.code)||tickState.loadingDay)return null;
   const pastDay=state.chartDate&&state.chartDate!==dayShanghai(),selected=hoveredPointTime||(pastDay?(state.chart.at(-1)?.time||`${state.chartDate} 15:00:00`):null);
@@ -804,32 +967,73 @@ function tickRender(data){
   if(anchor){let occurrence=0,index=rows.findIndex(row=>tickRowFingerprint(row)===anchor.key&&++occurrence===anchor.occurrence);wrap.scrollTop=index>=0?body.children[index].offsetTop+anchor.offset:oldTop;}else wrap.scrollTop=0;
   return true;
 }
-function tickSummary(data,cached=false,latest=false,readAt=0){const last=(data.rows||[]).reduce((max,r)=>Number.isFinite(Number(r.time))?Math.max(max,Number(r.time)):max,-Infinity);return data.rows?.length?tickCountTotalText(data.rows) + `｜最近成交：${tickClock(last)||'时间暂不可用'}（北京时间）${cached?`｜上次成功读取：${readAt?tickSourceTime(readAt):'时间暂不可用'}`:''}${data.history?.note?`｜${String(data.history.note).slice(0,80)}`:''}${marketPhase().open?'':'｜休市，暂停自动刷新'}`:'该时段暂无可用成交，不以其他日期数据代替。';}
+function tickSummary(data,cached=false,latest=false,readAt=0){const last=(data.rows||[]).reduce((max,r)=>Number.isFinite(Number(r.time))?Math.max(max,Number(r.time)):max,-Infinity);return data.rows?.length?tickLoadedSummary(data.rows) + `｜最近成交：${tickClock(last)||'时间暂不可用'}（北京时间）${cached?`｜上次成功读取：${readAt?tickSourceTime(readAt):'时间暂不可用'}`:''}${data.history?.note?`｜${String(data.history.note).slice(0,80)}`:''}${marketPhase().open?'':'｜'+marketPhase().label+'，暂停自动刷新'}`:'该时段暂无可用成交，不以其他日期数据代替。';}
+function historicalDateSelected(){return !!(state.chartDate&&state.chartDate!==dayShanghai());}
+function tickUsableLatestRow(row,code,day){const price=Number(row?.price),volume=Number(row?.volume);return !!row&&tickRowBeijingDay(row)===day&&(row.code==null||String(row.code)===code)&&Number.isFinite(price)&&price>0&&Number.isFinite(volume)&&volume>0;}
 function tickSync(force=false,explicit=false){
   if(!tickState.enabled)return;depthSync(force,explicit);const q=tickQuery();if(!q)return;
-  const changed=q.key!==tickState.key,canRequest=q.params.has('time')||marketPhase().open||explicit||changed;
+  const historicalDate=!!(state.chartDate&&state.chartDate!==dayShanghai()),changed=q.key!==tickState.key,canRequest=(!historicalDate&&marketPhase().open)||explicit;
   let cached=tickState.cache.get(q.key);
   if(!cached&&!q.params.has('time')){const lastKey=[...tickState.latestCache.keys()].filter(k=>k.startsWith(state.code+'|')&&tickState.latestCache.get(k)?.length).sort().at(-1);if(lastKey)cached={at:0,data:{rows:tickState.latestCache.get(lastKey)}};}
   if(changed){clearTimeout(tickState.debounce);tickState.controller?.abort();tickState.controller=null;tickState.generation++;tickState.key=q.key;if(cached?.data.rows?.length)tickRender(cached.data);else tickClear();}
   $('thsdkStockLabel').textContent=`${state.name||state.code}（${state.code}）`;$('thsdkMode').textContent=q.label;
   const liveFailure=tickState.failureKey===q.key&&!q.params.has('time');
   if(cached&&(!canRequest||(!force&&Date.now()-cached.at<60000))&&!liveFailure){tickRender(cached.data);$('thsdkStatus').classList.remove('thsdk-error');$('thsdkStatus').textContent=tickSummary(cached.data,true,!q.params.has('time'),cached.successAt);return;}
-  if(!canRequest){if(changed||$('thsdkTableWrap').hidden)$('thsdkStatus').textContent='休市，保留最后有效成交，暂停自动刷新。';return;}
+  if(!canRequest){if(changed||$('thsdkTableWrap').hidden)$('thsdkStatus').textContent=historicalDate&&!explicit?'已选历史日期，仅显示服务器已存成交，不自动补取。':marketPhase().label+'，保留最后有效成交，暂停自动刷新。';if(!cached)void tickRestoreStored(q,tickState.generation);return;}
+  const storedCheckKey=`${state.code}|${marketPhase().day}`;
+  if(!q.params.has('time')&&!tickState.storedChecks.has(storedCheckKey)){
+    const loadKey=`${state.code}|${tickState.generation}|${q.key}`;
+    if(!tickStoredLoads.has(loadKey))void tickRestoreStored(q,tickState.generation,storedCheckKey,explicit);
+    return;
+  }
   if(!changed&&!force&&!explicit&&!liveFailure)return;if(tickState.controller||thsdkReadUntil(`${THSDK_TICK_API}?${q.params}`)>Date.now())return;
   clearTimeout(tickState.debounce);$('thsdkStatus').classList.remove('thsdk-error');if($('thsdkTableWrap').hidden)$('thsdkStatus').textContent='正在加载成交…';
-  const generation=tickState.generation;tickState.debounce=setTimeout(()=>tickFetch(q,generation,explicit||changed),changed?120:0);
+  const generation=tickState.generation;tickState.debounce=setTimeout(()=>tickFetch(q,generation,explicit),changed?120:0);
 }
-async function tickReadResponse(q,signal){return thsdkRead(`${THSDK_TICK_API}?${q.params}`,signal);}
+const tickStoredLoads=new Map();
+async function tickRestoreStored(q,generation,latestCheckKey='',explicit=false){
+  const code=q.params.get('code'),loadKey=code+'|'+generation+'|'+q.key;
+  if(tickStoredLoads.has(loadKey))return;
+  tickStoredLoads.set(loadKey,true);
+  let hasCurrentDayRows=false;
+  try{
+    const db=await StableRecords.recordDB.open(),tx=db.transaction('ticks'),request=tx.objectStore('ticks').index('code').getAll(code);
+    const saved=await new Promise((resolve,reject)=>{request.onsuccess=()=>resolve(request.result||[]);request.onerror=()=>reject(request.error||Error('服务器已存成交暂不可读'));});
+    if(generation!==tickState.generation||q.key!==tickState.key||!tickState.enabled)return;
+    hasCurrentDayRows=saved.some(v=>tickUsableLatestRow(v?.row,code,dayShanghai()));
+    if(latestCheckKey)tickState.storedChecks.add(latestCheckKey);
+    let selected=saved.filter(v=>v?.row);
+    if(q.params.has('date')){
+      const day=q.params.get('date'),end=Date.parse(day+'T'+q.params.get('time')+'+08:00'),start=end-60000;
+      selected=selected.filter(v=>tickRowBeijingDay(v.row)===day&&Number(v.row.time)*1000>=start&&Number(v.row.time)*1000<=end);
+    }else{
+      const day=selected.map(v=>tickRowBeijingDay(v.row)).filter(Boolean).sort().at(-1);
+      selected=selected.filter(v=>tickRowBeijingDay(v.row)===day);
+    }
+    const rows=selected.map(v=>v.row),successAt=selected.reduce((last,v)=>Math.max(last,Date.parse(v.first_received_at)||0),0);
+    const data={source:'THSDK',code,columns:[],rows,query:Object.fromEntries(q.params),stored_only:true};
+    if(rows.length){tickRender(data);tickState.cache.set(q.key,{at:Date.now(),successAt,data});$('thsdkStatus').classList.remove('thsdk-error');$('thsdkStatus').textContent=tickSummary(data,true,!q.params.has('time'),successAt)+'｜仅显示服务器已存记录，未请求行情源。';}
+    else if($('thsdkTableWrap').hidden)$('thsdkStatus').textContent=latestCheckKey&&marketPhase().open?'本交易日暂无已存成交，未请求行情源；点击“返回最新”可手动刷新。':historicalDateSelected()?'所选历史日期暂无已存成交记录；不自动补取。':marketPhase().label+'，所选股票/时段暂无已存成交记录；不自动访问行情源。';
+    if(latestCheckKey){
+      if(!hasCurrentDayRows)tickState.emptySavedDays.add(latestCheckKey);
+      else tickState.emptySavedDays.delete(latestCheckKey);
+    }
+    if(explicit)await tickFetch(q,generation,true);
+  }catch(error){if(generation===tickState.generation&&q.key===tickState.key)$('thsdkStatus').textContent=marketPhase().open?'已存成交暂不可读；暂不自动补取，保留当前显示。':'休市，已存成交暂不可读；保留当前显示，不访问行情源。';tickStoredLoads.delete(loadKey);}
+  if(tickStoredLoads.size>128){for(const key of tickStoredLoads.keys())if(key!==loadKey)tickStoredLoads.delete(key);}
+}
+async function tickReadResponse(q,signal,explicit=false){return thsdkRead(`${THSDK_TICK_API}?${q.params}`,signal,explicit);}
 async function tickFetch(q,generation,explicit=false){
-  if(generation!==tickState.generation||!tickState.enabled||(!q.params.has('time')&&!marketPhase().open&&!explicit))return;
+  if(generation!==tickState.generation||!tickState.enabled||(!marketPhase().open&&!explicit)||(!explicit&&historicalDateSelected()))return;
   const controller=new AbortController();tickState.controller=controller;const timeout=setTimeout(()=>controller.abort(),18000);
   let stage='read';
-  try{const data=await tickReadResponse(q,controller.signal);
+  try{const data=await tickReadResponse(q,controller.signal,explicit);
     if(data.source!=='THSDK'||data.code!==q.params.get('code')||!Array.isArray(data.columns)||!Array.isArray(data.rows))throw Error('逐笔响应字段或股票代码不匹配');
     if(q.params.has('date')&&(data.query?.date!==q.params.get('date')||data.query?.time!==q.params.get('time')))throw Error('逐笔响应日期或时间不匹配');
     if(generation!==tickState.generation||q.key!==tickState.key||!tickState.enabled)return;
+    if(!q.params.has('time')&&data.rows.some(row=>tickUsableLatestRow(row,q.params.get('code'),dayShanghai())))tickState.emptySavedDays.delete(`${q.params.get('code')}|${marketPhase().day}`);
     stage='display';bookRecorder.capture('ticks',data,Object.fromEntries(q.params));
-    if(!data.rows.length){$('thsdkStatus').classList.remove('thsdk-error');$('thsdkStatus').textContent=!$('thsdkTableWrap').hidden?'暂无新成交，保留最后有效数据。':'暂无可用成交；有数据后将自动显示。';return;}
+    if(!data.rows.length){$('thsdkStatus').classList.remove('thsdk-error');$('thsdkStatus').textContent=!$('thsdkTableWrap').hidden?'暂无新成交，保留最后有效数据。':'暂无可用成交；有数据后将自动显示。';void bookRecorder.reloadServerRecords();return;}
     if(q.params.has('time')){
       const successAt=Date.now();tickRender(data);$('thsdkStatus').classList.remove('thsdk-error');$('thsdkStatus').textContent=tickSummary(data,false,false,successAt);tickState.cache.set(q.key,{at:successAt,successAt,data});tickState.failureKey='';tickState.lastSuccessAt=successAt;
     }else{
@@ -852,18 +1056,18 @@ function depthRecord(code){if(depthState.records.has(code))return depthState.rec
 function depthShow(note=''){
   const code=state.code,record=depthRecord(code);$('depthReadOnce').disabled=!/^\d{6}$/.test(code)||!!depthState.controller||depthSelected();
   if(depthSelected()){depthRender();depthState.renderedSignature='';$('thsdkDepthStatus').textContent='所选时刻的五档暂不支持。返回最新后可查看最新可用盘口。';return;}
-  if(record){depthRender(record.rows);depthState.renderedCode=code;depthState.renderedSignature=JSON.stringify(record.rows);$('thsdkDepthStatus').textContent=`最新可用五档｜读取于 ${tickSourceTime(record.checked_at||record.fetched_at)}（北京时间）。源未提供盘口时间。${marketPhase().open?'':'休市，暂停自动刷新。'}${note}`;}
-  else{depthRender();$('thsdkDepthStatus').textContent='暂无可用五档。'+note;}
+  if(record){depthRender(record.rows);depthState.renderedCode=code;depthState.renderedSignature=JSON.stringify(record.rows);$('thsdkDepthStatus').textContent=`最新可用五档｜读取于 ${tickSourceTime(record.checked_at||record.fetched_at)}（北京时间）。源未提供盘口时间。${marketPhase().open?'':marketPhase().label+'，暂停自动刷新。'}${note}`;}
+  else{depthRender();$('thsdkDepthStatus').textContent='暂无可用五档。'+(marketPhase().open?'':marketPhase().label+'，暂停自动刷新。')+note;}
 }
 function depthStop(){depthState.manual=false;depthState.generation++;depthState.controller?.abort();depthState.controller=null;}
 function depthReset(){depthStop();depthState.lastCode='';depthState.renderedCode='';depthState.renderedSignature='';depthRender();$('depthReadOnce').disabled=true;$('thsdkDepthStatus').textContent='查询后显示最新可用五档。';}
 function depthSync(force=false,manual=false){
   if(!/^\d{6}$/.test(state.code))return;
   if(depthSelected()){if(depthState.controller)depthStop();depthShow();return;}
-  if(!manual&&!marketPhase().open&&depthState.lastCode===state.code){depthShow();return;}
+  if(!manual&&!marketPhase().open){depthShow();return;}
   if(depthState.controller||thsdkReadUntil(THSDK_TICK_API.replace('/api/ticks','/api/depth')+'?code='+state.code)>Date.now())return;if(!force&&!manual&&depthState.lastCode===state.code){depthShow();return;}
   let note='';const code=state.code,generation=depthState.generation,controller=new AbortController();depthState.controller=controller;depthState.manual=manual;depthState.lastCode=code;const timeout=setTimeout(()=>controller.abort(),18000);depthShow('正在读取…');
-  thsdkRead(THSDK_TICK_API.replace('/api/ticks','/api/depth')+'?code='+code,controller.signal).then(data=>{
+  thsdkRead(THSDK_TICK_API.replace('/api/ticks','/api/depth')+'?code='+code,controller.signal,manual).then(data=>{
     if(data.source!=='THSDK'||data.code!==code||!Array.isArray(data.rows))throw Error('五档响应字段不匹配');if(generation!==depthState.generation||code!==state.code)return;
     if(!data.rows.some(r=>r.price!==null&&Number.isFinite(Number(r.price))&&Number(r.price)>0)){note='本次无有效报价，保留最后有效数据。';return;}
     bookRecorder.capture('depth',data);
@@ -1105,33 +1309,86 @@ const DerivedRateReset = (() => {
 })();
 
 // Local watchlist is independent of query history and recorder data. Never delete recordings on removal.
+/* Server-backed favorites; no native browser storage or raw record writes. */
 const watchlist = (() => {
-  const key='stock-watchlist-v1'; let items=[],storageError='',renderKey='';
-  try { const saved=JSON.parse(localStorage.getItem(key)||'[]'); if(Array.isArray(saved))items=saved.filter(x=>x&&/^\d{6}$/.test(x.code)).filter((x,i,a)=>a.findIndex(y=>y.code===x.code)===i).map(x=>({code:x.code,name:String(x.name||x.code)})); } catch {storageError='自选列表读取失败；未覆盖原有保存内容。';}
+  const key='stock-watchlist-v1';
+  let items=[],expanded=false,resetMode=false,recordsOpen=false,restoreOpen=false,busy=false,selectionAction='reset',renderKey='';
+  let quoteTimer=0,quoteBusy=false;const quoteCache=new Map(),checkedCodes=new Set();
+  const records=()=>window.StableRecords||{};
+  const appState=()=>{try{return state||{};}catch(_){return window.state||{};}};
+  const el=id=>typeof $==='function'?$(id):document.getElementById(id);
+  const text=(id,value)=>{const n=el(id);if(n)n.textContent=value;};
+  function show(id,visible){const n=el(id);if(!n)return;n.hidden=!visible;n.setAttribute('aria-hidden',String(!visible));if(visible)n.style.removeProperty('display');else n.style.setProperty('display','none','important');}
+  const clean=list=>(Array.isArray(list)?list:[]).filter(x=>x&&/^\d{6}$/.test(String(x.code||''))).map(x=>({code:String(x.code),name:String(x.name||x.code)})).filter((x,i,a)=>a.findIndex(y=>y.code===x.code)===i);
+  function load(){try{const raw=records().storage?.getItem(key);items=clean(raw?JSON.parse(raw):[]);}catch(_){items=[];}}
+  function persist(next){try{records().storage.setItem(key,JSON.stringify(next));items=clean(next);renderKey='';return true;}catch(_){text('watchlistStatus','保存失败，请重试');return false;}}
   const codes=()=>items.map(x=>x.code);
-  function persist(next){try{localStorage.setItem(key,JSON.stringify(next));items=next;storageError='';return true;}catch{storageError='自选保存失败（可能存储空间不足），原列表未更改。';render();return false;}}
+  function quoteNode(item){
+    const n=document.createElement('span');n.className='watchlist-quote watchlist-q';const cached=quoteCache.get(item.code),q=cached?.quote;
+    const pct=q?.change_pct??q?.change_percent??q?.changePct??q?.percent;
+    if(!q||!Number.isFinite(Number(q.current))||Number(q.current)<=0||pct===null||pct===undefined||pct===''||!Number.isFinite(Number(pct))){n.textContent='—';n.classList.add('flat');n.title='暂无可用涨跌幅';return n;}
+    const value=Number(pct);n.textContent=`${value>0?'+':''}${value.toFixed(2)}%${cached.stale?' · 旧':''}`;n.classList.add(value>0?'up':value<0?'down':'flat');
+    n.title=`来源时间：${cached.time||'待确认'}${cached.stale?'；更新失败，显示上次有效行情':''}${Number(q.volume_raw)===0?'；暂无成交':''}`;return n;
+  }
+  function row(item){
+    const row=document.createElement('div');row.className='watchlist-row';
+    const open=document.createElement('button');open.type='button';open.className='watchlist-open';open.setAttribute('aria-label',`查看 ${item.name} ${item.code}`);
+    const identity=document.createElement('span');identity.className='watchlist-identity';const name=document.createElement('span');name.className='watchlist-name';name.textContent=item.name;const code=document.createElement('span');code.className='watchlist-code';code.textContent=item.code;identity.append(name,code);open.append(identity,quoteNode(item));
+    open.title='查看行情';
+    open.addEventListener('click',async()=>{if(busy)return;const q=el('query');if(q)q.value=item.code;if(typeof runQuery==='function')await runQuery();const result=el('result');if(result){result.hidden=false;result.scrollIntoView({behavior:'smooth',block:'start'});}});row.append(open);
+    if(resetMode){const cb=document.createElement('input');cb.type='checkbox';cb.className='watchlist-reset-check';cb.value=item.code;cb.setAttribute('aria-label',`选择股票 ${item.name} ${item.code}`);cb.checked=checkedCodes.has(item.code);cb.disabled=busy;cb.addEventListener('change',()=>{if(cb.checked)checkedCodes.add(item.code);else checkedCodes.delete(item.code);selectionUI();});row.append(cb);}
+
+    return row;
+  }
+  function selectionUI(){show('watchlistConfirmReset',resetMode&&selectionAction==='reset');show('watchlistConfirmRemove',resetMode&&selectionAction==='remove');text('watchlistSelectionCount',`已选 ${checkedCodes.size} 只`);text('watchlistSelectAll',items.length>0&&checkedCodes.size===items.length?'取消全选':'全选');if(el('watchlistConfirmReset'))el('watchlistConfirmReset').disabled=busy||!checkedCodes.size;if(el('watchlistConfirmRemove'))el('watchlistConfirmRemove').disabled=busy||!checkedCodes.size;if(el('watchlistCancelReset'))el('watchlistCancelReset').disabled=busy;if(el('watchlistSelectAll'))el('watchlistSelectAll').disabled=busy;}
   function render(){
-    const member=items.some(x=>x.code===state.code),button=$('watchlistToggle');button.disabled=!/^\d{6}$/.test(state.code);button.textContent=member?'移出自选':'加入自选';button.setAttribute('aria-pressed',String(member));
-    const targets=bookRecorder.collectionCodes(),pausedCount=targets.filter(code=>bookRecorder.isCodePaused(code)).length;const paused=bookRecorder.isPaused()||(targets.length>0&&pausedCount===targets.length);
-    $('watchlistStatus').textContent=storageError||`${items.length} 只自选｜${paused?'全部采集已暂停':pausedCount?`已暂停 ${pausedCount} 只，其余按原规则采集`:document.hidden?'后台继续尝试采集（浏览器可能节流）':marketPhase().open?'交易时段，按实时采样间隔采集':marketPhase().label+'，自动轮询暂停'}｜列表和记录保存在当前浏览器，不跨设备同步。`;
-    const nextKey=JSON.stringify(items.map(item=>[item.code,item.name,bookRecorder.status(item.code)]));if(nextKey===renderKey)return;renderKey=nextKey;
-    $('watchlistItems').replaceChildren(...items.map(item=>{const row=document.createElement('div');row.style.cssText='display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--line)';const open=document.createElement('button');open.className='secondary';open.textContent=`${item.name}（${item.code}）`;open.title='查看该股行情、已有记录和导出';open.addEventListener('click',()=>{$('query').value=item.code;void runQuery();});const status=document.createElement('span');status.className='small';status.style.flex='1';status.textContent=bookRecorder.status(item.code);const remove=document.createElement('button');remove.className='secondary';remove.textContent='移出';remove.setAttribute('aria-label',`移出自选 ${item.code}`);remove.addEventListener('click',()=>removeCode(item.code));row.append(open,status,remove);return row;}));
-    if(!items.length){const note=document.createElement('span');note.className='small';note.textContent='暂无自选。先查询股票，再点股票名称旁的“加入自选”。';$('watchlistItems').append(note);}
+    const toggle=el('watchlistToggle'),member=items.some(x=>x.code===appState().code);if(toggle){toggle.disabled=!/^\d{6}$/.test(appState().code||'');toggle.textContent=member?'移出自选':'加入自选';toggle.setAttribute('aria-pressed',String(member));}
+    renderOverallStatus();
+    const reveal=el('watchlistReveal');if(reveal){const chevron=el('watchlistChevron');if(chevron)chevron.textContent=expanded?'⌃':'⌄';reveal.setAttribute('aria-label',expanded?'收起我的自选':'展开我的自选');reveal.setAttribute('aria-expanded',String(expanded));}
+    show('watchlistManage',expanded);show('watchlistItems',expanded);show('watchlistReset',expanded&&!resetMode);show('watchlistRemove',expanded&&!resetMode);show('watchlistTools',expanded&&!resetMode);show('watchlistResetArea',expanded&&resetMode);show('favoriteRecordsArea',expanded&&recordsOpen&&!resetMode);show('favoriteRestoreArea',expanded&&restoreOpen&&!resetMode);
+    if(el('watchlistReset'))el('watchlistReset').disabled=!items.length;if(el('watchlistRemove'))el('watchlistRemove').disabled=!items.length;if(!expanded){stopQuotes();return;}
+    const next=JSON.stringify(items.map(x=>[x.code,x.name,quoteCache.get(x.code),resetMode,busy,checkedCodes.has(x.code)]));if(next!==renderKey){renderKey=next;el('watchlistItems').replaceChildren(...items.map(row));if(!items.length){const n=document.createElement('p');n.className='small watchlist-empty';n.textContent='暂无自选';el('watchlistItems').append(n);}}
+    selectionUI();startQuotes();
   }
-  function removeCode(code){if(persist(items.filter(x=>x.code!==code))){bookRecorder.syncWatchlist();render();}}
-  function toggle(){if(!/^\d{6}$/.test(state.code))return;if(items.some(x=>x.code===state.code))return removeCode(state.code);if(persist([...items,{code:state.code,name:state.name||state.code}])){bookRecorder.syncWatchlist();render();}}
-  function updateName(code,name){if(name&&name!==code&&items.some(x=>x.code===code&&x.name!==name))persist(items.map(x=>x.code===code?{code,name}:x));}
-  function selectionInputs(){return [...$('collectionSelectionItems').querySelectorAll('input[type=checkbox]')];}
-  function selectionCount(){const count=selectionInputs().filter(x=>x.checked).length;$('collectionSelectionCount').textContent=`已选 ${count} / ${selectionInputs().length} 只`;$('collectionPauseSelected').disabled=!count;$('collectionResumeSelected').disabled=!count;}
-  function closeSelection(){$('collectionSelection').hidden=true;$('watchlistPause').setAttribute('aria-expanded','false');$('watchlistPause').focus();}
-  function openSelection(){
-    const targets=bookRecorder.collectionCodes();$('collectionSelectionItems').replaceChildren(...targets.map(code=>{const label=document.createElement('label');label.style.cssText='display:flex;gap:8px;align-items:center;min-height:36px';const input=document.createElement('input');input.type='checkbox';input.value=code;input.checked=true;input.addEventListener('change',selectionCount);const text=document.createElement('span'),name=items.find(x=>x.code===code)?.name||(state.code===code?state.name:code)||code;text.textContent=`${name}（${code}）${state.code===code?' · 当前股':''}｜${bookRecorder.isCodePaused(code)?'采集已暂停':'采集已启用'}`;label.append(input,text);return label;}));
-    $('collectionSelection').hidden=false;$('watchlistPause').setAttribute('aria-expanded','true');selectionCount();if(!targets.length)$('collectionSelectionCount').textContent='暂无可选股票，请先查询股票或加入自选。';$('collectionSelectAll').focus();
+  function removeCode(code){checkedCodes.delete(code);if(persist(items.filter(x=>x.code!==code))){bookRecorder?.syncWatchlist?.();render();}}
+  function toggle(){const code=appState().code;if(!/^\d{6}$/.test(code))return;if(items.some(x=>x.code===code)){expanded=true;openReset('remove');checkedCodes.add(code);renderKey='';render();el('watchlistPanel')?.scrollIntoView({behavior:'smooth',block:'start'});}else if(persist([...items,{code,name:appState().name||code}])){bookRecorder?.syncWatchlist?.();render();}}
+  function updateName(code,name){if(name&&items.some(x=>x.code===code&&x.name!==name))persist(items.map(x=>x.code===code?{code,name}:x));render();}
+  async function fetchQuote(item){try{const q=await rawQuote(marketSymbol(item.code));if(!q||!Number.isFinite(Number(q.current))||Number(q.current)<=0)throw Error('unavailable');quoteCache.set(item.code,{quote:q,time:q.time||q.timestamp||'',stale:false});}catch(_){const old=quoteCache.get(item.code);if(old)quoteCache.set(item.code,{...old,stale:true});}}
+  async function quoteRound(){if(quoteBusy||!expanded||document.hidden||!marketPhase().open)return;quoteBusy=true;let i=0;const worker=async()=>{while(i<items.length&&marketPhase().open){const item=items[i++];if(item)await fetchQuote(item);}};try{await Promise.all([worker(),worker()]);}finally{quoteBusy=false;renderKey='';render();}}
+  function startQuotes(){if(!marketPhase().open){stopQuotes();return;}if(!quoteTimer&&expanded&&!document.hidden){quoteTimer=window.setInterval(()=>void quoteRound(),15000);void quoteRound();}}
+  function stopQuotes(){if(quoteTimer){clearInterval(quoteTimer);quoteTimer=0;}}
+  function openReset(action='reset'){if(!expanded||!items.length)return;selectionAction=action;checkedCodes.clear();resetMode=true;recordsOpen=false;restoreOpen=false;text('watchlistResetStatus','');text('collectionActionStatus','');renderKey='';render();}
+  function closeReset(){if(busy)return;checkedCodes.clear();resetMode=false;text('watchlistResetStatus','');renderKey='';render();}
+  async function doReset(action='reset'){
+    if(busy||!resetMode||action!==selectionAction)return;const chosen=codes().filter(c=>checkedCodes.has(c));if(!chosen.length)return;busy=true;renderKey='';render();
+    try{const result=await (selectionAction==='remove'?records().remove(chosen):records().reset(chosen));if(!result||(Array.isArray(result)&&!result.length))throw Error('未确认');await bookRecorder?.reloadServerRecords?.();resetMode=false;checkedCodes.clear();text('collectionActionStatus','');await refreshArchive();if(typeof window.refreshArchive==='function')window.refreshArchive();}
+    catch(_){text('watchlistResetStatus',selectionAction==='remove'?'移出未确认，请重试':'重置未确认，请重试');}finally{busy=false;renderKey='';render();}
   }
-  function applySelection(value){const selected=selectionInputs().filter(x=>x.checked).map(x=>x.value);if(!selected.length)return;bookRecorder.setCodesPaused(selected,value);$('collectionActionStatus').textContent=`已${value?'暂停':'继续'} ${selected.length} 只股票采集：${selected.join('、')}。未选股票与已有数据未更改。`;closeSelection();}
-  function init(){$('watchlistToggle').addEventListener('click',toggle);$('watchlistPause').addEventListener('click',openSelection);$('collectionSelectAll').addEventListener('click',()=>{selectionInputs().forEach(x=>x.checked=true);selectionCount();});$('collectionSelectNone').addEventListener('click',()=>{selectionInputs().forEach(x=>x.checked=false);selectionCount();});$('collectionPauseSelected').addEventListener('click',()=>applySelection(true));$('collectionResumeSelected').addEventListener('click',()=>applySelection(false));$('collectionSelectionCancel').addEventListener('click',closeSelection);$('collectionSelection').addEventListener('keydown',e=>{if(e.key==='Escape')closeSelection();});bookRecorder.syncWatchlist();render();}
-  return {codes,render,init,updateName};
+  function shortTime(value){if(!value)return '待确认';const d=new Date(value);if(!Number.isFinite(d.getTime()))return '待确认';return new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(d);}
+  async function refreshArchive(){const host=el('favoriteRestoreItems');if(!host||typeof records().archives!=='function')return;try{const data=await records().archives(),batches=Array.isArray(data?.batches)?data.batches.filter(x=>x.state!=='restored'&&x.state!=='expired'&&(x.recoverable_count===undefined||x.recoverable_count>0)):[];host.replaceChildren();if(!batches.length){const n=document.createElement('p');n.className='small';n.textContent='暂无可恢复记录';host.append(n);return;}for(const batch of batches){const row=document.createElement('div');row.className='watchlist-restore-row';const label=document.createElement('span');label.textContent=`${(batch.codes||[]).join('、')} · ${shortTime(batch.expires_at)} 到期`;label.title=`重置：${batch.reset_at||'—'}；全局最近5个交易日窗口内可恢复，不延长保留期`;const btn=document.createElement('button');btn.type='button';btn.className='secondary';btn.textContent='恢复';btn.addEventListener('click',async()=>{btn.disabled=true;try{await records().restore(batch.id);await bookRecorder?.reloadServerRecords?.();text('favoriteRestoreStatus','已恢复');await refreshArchive();}catch(_){btn.disabled=false;text('favoriteRestoreStatus','恢复失败，请重试');}});row.append(label,btn);host.append(row);}}
+    catch(_){host.replaceChildren();text('favoriteRestoreStatus','恢复列表读取失败，请重试');}}
+  let overall=null,overallExpires=0,overallNext=0,overallBusy=false;
+  function renderOverallStatus(){
+    const now=performance.now();
+    const phase=marketPhase(),label=!phase.open?phase.label:(overall&&now<overallExpires?overall.label:'日历/采集状态待确认');
+    text('watchlistOverallStatus',label);
+  }
+  async function refreshOverallStatus(){
+    if(overallBusy||document.hidden)return;overallBusy=true;const started=performance.now();
+    try{const data=await records().api('bootstrap?overview=1'),asOf=Date.parse(data.as_of),until=Date.parse(data.valid_until);
+      if(typeof data.label!=='string'||!data.label||!Number.isFinite(asOf)||!Number.isFinite(until)||until<=asOf)throw Error('status unknown');
+      marketClockAnchor={time:asOf,mono:started};overall=data;overallExpires=started+Math.min(20000,until-asOf);overallNext=Math.min(performance.now()+10000,overallExpires);
+    }catch(_){overall=null;overallExpires=0;overallNext=performance.now()+15000;}finally{overallBusy=false;renderOverallStatus();}
+  }
+  function init(){
+    load();el('watchlistToggle')?.addEventListener('click',toggle);el('watchlistReveal')?.addEventListener('click',()=>{if(busy)return;expanded=!expanded;if(!expanded){resetMode=false;recordsOpen=false;restoreOpen=false;checkedCodes.clear();}renderKey='';render();});
+    el('watchlistViewRecords')?.addEventListener('click',()=>{recordsOpen=!recordsOpen;restoreOpen=false;el('watchlistViewRecords').setAttribute('aria-expanded',String(recordsOpen));render();});el('watchlistRestore')?.addEventListener('click',()=>{restoreOpen=!restoreOpen;recordsOpen=false;el('watchlistRestore').setAttribute('aria-expanded',String(restoreOpen));render();if(restoreOpen)void refreshArchive();});
+    el('watchlistReset')?.addEventListener('click',()=>openReset('reset'));el('watchlistRemove')?.addEventListener('click',()=>openReset('remove'));el('watchlistCancelReset')?.addEventListener('click',closeReset);el('watchlistConfirmReset')?.addEventListener('click',()=>void doReset('reset'));el('watchlistConfirmRemove')?.addEventListener('click',()=>void doReset('remove'));el('watchlistSelectAll')?.addEventListener('click',()=>{if(checkedCodes.size===items.length)checkedCodes.clear();else codes().forEach(c=>checkedCodes.add(c));renderKey='';render();});
+    window.addEventListener('stable-records-state',e=>{renderOverallStatus();const server=e?.detail?.items;if(server&&Object.prototype.hasOwnProperty.call(server,key)){let parsed;try{parsed=JSON.parse(server[key]);}catch{return;}const next=clean(parsed);if(JSON.stringify(next)!==JSON.stringify(items)){items=next;for(const c of checkedCodes)if(!codes().includes(c))checkedCodes.delete(c);renderKey='';render();}}});document.addEventListener('visibilitychange',()=>{if(document.hidden)stopQuotes();else{renderOverallStatus();void refreshOverallStatus();if(expanded)startQuotes();}});bookRecorder?.syncWatchlist?.();render();void refreshOverallStatus();window.setInterval(()=>{renderOverallStatus();if(expanded)startQuotes();if(performance.now()>=overallNext)void refreshOverallStatus();},1000);
+  }
+  return {codes,render,init,updateName,nameFor:code=>items.find(x=>x.code===code)?.name};
 })();
+
 
 // Browser-only multi-stock recorder. No server/background service is started.
 const bookRecorder = (() => {
@@ -1141,11 +1398,11 @@ const bookRecorder = (() => {
   let viewTime = null;
   const last = new Map(), knownTicks = new Map(), sessions = new Map(), segments = new Map(), caches = new Map();
   const box = document.createElement('section'); box.className='card'; box.id='bookRecorder';
-  box.innerHTML=`<div class="section-head" style="flex-wrap:wrap"><h2>实时快照明细（逐次接口返回） / 记录管理</h2><label class="small"><input id="bookRecordEnabled" type="checkbox" checked> 随页面刷新记录</label></div><p class="small">查询后从启动时刻累计；同股票同日重新打开接续原会话，暂停处断开比较。自选股从打开网页时同步采集，切换股票不重置自选记录。滑动趋势图仍记录当前盘口，选点按当时已收到的数据重算，不使用后来数据。</p><p id="bookRecordStatus" class="small" role="status">等待查询；记录保存在本浏览器。</p><div style="display:flex;gap:8px;flex-wrap:wrap"><button id="bookRecordRestart" class="secondary" type="button">从现在重新统计</button><button id="bookRecordJSON" class="secondary" type="button">导出原始记录 JSON</button><button id="bookRecordCSV" class="secondary" type="button">导出五档变化 CSV</button><button id="bookStatsCSV" class="secondary" type="button">导出累计统计 CSV</button></div><p id="bookStatsDetail" class="small"></p><details><summary>方向与比率如何计算？</summary><p class="hint">每次五档更新，按同侧、同价格记录每一次增加和减少，不用首尾差额抵消中途变化。直到成交明细出现新记录时结算这一段，间隔不固定，不按3秒切窗。每次更新都汇总买卖两侧全部五档：每档先累加该段所有正变化和负变化；若减少－同价成交为正，计撤单；若为负，其绝对值转为加单。所以加单＝观察增加＋max(0，同价成交－观察减少)，撤单＝max(0，观察减少－同价成交)；净加单＝加单－撤单。同价没有成交记录或成交为0，均按0手成交。成交大于观察减少时，超出部分转记加单。重复非空响应不重复结算；成功空响应按零成交更新。逐档计算后再分别合计买盘、卖盘。加单率、撤单率、净加单率分别用对应累计数量÷观察期间累计全部成交量×100%；分母含五档内外，每笔只计一次。分母为0时数量保留，比率无法计算；比率可超过100%，不是涨跌概率。盘口价位移动按价格跟踪；进入或移出五档因外部余量未知，仅记边界，不凭空算加撤。成交价仅唯一对应一侧时抵扣该档减少，归侧不明只计分母。尚未出现下一次成交明细更新的变化保留在原始明细中，等待结算。暂停、断网和无效快照不连接比较。本统计仅为可观测快照推算，并非交易所逐笔委托；同一采样间未看到的变化无法补造，原始数据不删改。</p></details><p id="bookSnapshotCadence" class="small">下表跟随每次成功返回的盘口快照更新，不是3秒汇总。默认每1秒尝试请求（可调整），同接口请求未完成时不重叠；收到并保存后立即重算各表。上游缓存、请求耗时及浏览器调度仍会产生延迟，并非交易所逐事件推送。展示最近变化，全部记录可导出。</p><div id="bookRawChangesTable" class="table-wrap" style="margin-top:12px;max-height:300px"><table style="min-width:620px"><thead><tr><th>读取时间（北京）</th><th>盘口侧 / 价格</th><th>上次可见挂量（手）</th><th>本次可见挂量（手）</th><th>净变化（手）</th></tr></thead><tbody id="bookRecordRows"></tbody></table></div><p class="hint">五档未提供交易所事件时间，读取时间不等于委托变化时间；加单率、撤单率按上述五档快照口径计算。进入、移出五档仅记边界，不作为加撤单；原始缺失挂量仍保留原样。关页、断网和后台节流会留下不可补回的五档缺口。数据保存在本浏览器，不跨设备共享，可导出备份。</p>`;
+  box.innerHTML=`<div class="section-head" style="flex-wrap:wrap"><h2>实时快照明细（逐次接口返回） / 记录管理</h2></div><p class="small">自选股由服务器在交易时段自动采集；关闭网页后继续。同股同日接续后台会话，重置后从服务器确认的新起点累计。滑动趋势图仍记录当前盘口，选点按当时已收到的数据重算，不使用后来数据。</p><p id="bookRecordStatus" class="small" role="status">等待查询；新记录仅保存到服务器。</p><div style="display:flex;gap:8px;flex-wrap:wrap"><button id="bookRecordRestart" class="secondary" type="button">刷新服务器记录</button><button id="bookRecordJSON" class="secondary" type="button">导出原始记录 JSON</button><button id="bookRecordCSV" class="secondary" type="button">导出五档变化 CSV</button><button id="bookStatsCSV" class="secondary" type="button">导出累计统计 CSV</button></div><p id="bookStatsDetail" class="small"></p><details><summary>方向与比率如何计算？</summary><p class="hint">每次五档更新，按同侧、同价格记录每一次增加和减少，不用首尾差额抵消中途变化。直到成交明细出现新记录时结算这一段，间隔不固定，不按3秒切窗。每次更新都汇总买卖两侧全部五档：每档先累加该段所有正变化和负变化；若减少－同价成交为正，计撤单；若为负，其绝对值转为加单。所以加单＝观察增加＋max(0，同价成交－合计减少)，撤单＝max(0，合计减少－同价成交)；净加单＝加单－撤单。同价没有成交记录或成交为0，均按0手成交。成交大于合计减少时，超出部分转记加单。重复非空响应不重复结算；成功空响应按零成交更新。逐档计算后再分别合计买盘、卖盘。加单率、撤单率、净加单率分别用对应累计数量÷观察期间累计全部成交量×100%；分母含五档内外，每笔只计一次。分母为0时数量保留，比率无法计算；比率可超过100%，不是涨跌概率。盘口价位移动按价格跟踪；进入或移出五档因外部余量未知，仅记边界，不凭空算加撤。成交价仅唯一对应一侧时抵扣该档减少，归侧不明只计分母。尚未出现下一次成交明细更新的变化保留在原始明细中，等待结算。暂停、断网和无效快照不连接比较。本统计仅为可观测快照推算，并非交易所逐笔委托；同一采样间未看到的变化无法补造，原始数据不删改。</p></details><p id="bookSnapshotCadence" class="small">下表随每轮成功返回后保存/更新的盘口快照更新，不是3秒汇总。快照变化明细由相邻成功快照对比得出，只反映采样时可观察到的变化；采样间的盘口变化可能无法记录。成交更新在收到新成交数据后结算相应变化。上游缓存、请求耗时及后台调度仍可能造成延迟或缺口；这不是数据源主动推送每次真实盘口变化。展示最近变化，全部记录可导出。</p><div id="bookRawChangesTable" class="table-wrap" style="margin-top:12px;max-height:300px"><table style="min-width:620px"><thead><tr><th>读取时间（北京）</th><th>盘口侧 / 价格</th><th>上次可见挂量（手）</th><th>本次可见挂量（手）</th><th>净变化（手）</th></tr></thead><tbody id="bookRecordRows"></tbody></table></div><p class="hint">五档未提供交易所事件时间，读取时间不等于委托变化时间；加单率、撤单率按上述五档快照口径计算。进入、移出五档仅记边界，不作为加撤单；原始缺失挂量仍保留原样。服务中断、源故障或限速可能留下不可补回的五档缺口。原始数据仅保存在服务器，按原采集日保留5个交易日；可导出备份。</p>`;
   $('thsdkTicks').after(box);
   // Read-only history UI: independent of the live session and derived rate cutoffs.
   const historyBox=document.createElement('section');historyBox.id='bookSavedHistory';historyBox.className='card';
-  historyBox.innerHTML=`<h2>本地历史记录（只读）</h2><p class="small">跨日、切换股票或重置今日比率不会删除已保存的原始记录。这里按北京时间查看该股当天全部录制会话，不受当前会话起点、走势图选点或今日比率起点限制；不改变实时采集与上方统计。五档按收到日期、逐笔按源成交日期归档；点击“刷新本地历史”读取新增记录。数据仅在原浏览器中保存，未采集的时段不能补造。</p><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><label>记录日期 <select id="bookHistoryDay" aria-label="本地记录日期"></select></label><label>记录类型 <select id="bookHistoryKind" aria-label="本地记录类型"><option value="depth">五档原始快照</option><option value="ticks">逐笔原始记录</option></select></label><button id="bookHistoryRefresh" type="button" class="secondary">刷新本地历史</button><button id="bookHistoryExport" type="button" class="secondary">导出所选日期原始 JSON</button></div><p id="bookHistorySummary" class="small" role="status">查询股票后读取本浏览器已有记录。</p><details><summary>当日录制时段 / 会话（不连接缺口）</summary><div id="bookHistoryPeriods" class="small"></div></details><div class="table-wrap" style="max-height:400px;margin-top:8px"><table style="min-width:640px"><thead><tr><th>记录时间（北京）</th><th>原始记录</th></tr></thead><tbody id="bookHistoryRows"></tbody></table></div><div style="display:flex;gap:10px;align-items:center;margin-top:8px"><button id="bookHistoryPrev" type="button" class="secondary">历史较新页</button><span id="bookHistoryPage" class="small"></span><button id="bookHistoryNext" type="button" class="secondary">历史较早页</button></div>`;
+  historyBox.innerHTML=`<h2>服务器历史记录（只读）</h2><p class="small">跨日、切换股票或重置今日比率不会删除已保存的原始记录。这里按北京时间查看该股当天全部录制会话，不受当前会话起点、走势图选点或今日比率起点限制；不改变实时采集与上方统计。五档按收到日期、逐笔按源成交日期归档；点击“刷新服务器历史”读取新增记录。数据仅在服务器保存，未采集的时段不能补造。</p><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><label>记录日期 <select id="bookHistoryDay" aria-label="服务器记录日期"></select></label><label>记录类型 <select id="bookHistoryKind" aria-label="本地记录类型"><option value="depth">五档原始快照</option><option value="ticks">逐笔原始记录</option></select></label><button id="bookHistoryRefresh" type="button" class="secondary">刷新服务器历史</button><button id="bookHistoryExport" type="button" class="secondary">导出所选日期原始 JSON</button></div><p id="bookHistorySummary" class="small" role="status">查询股票后读取服务器已有记录。</p><details><summary>当日录制时段 / 会话（不连接缺口）</summary><div id="bookHistoryPeriods" class="small"></div></details><div class="table-wrap" style="max-height:400px;margin-top:8px"><table style="min-width:640px"><thead><tr><th>记录时间（北京）</th><th>原始记录</th></tr></thead><tbody id="bookHistoryRows"></tbody></table></div><div style="display:flex;gap:10px;align-items:center;margin-top:8px"><button id="bookHistoryPrev" type="button" class="secondary">历史较新页</button><span id="bookHistoryPage" class="small"></span><button id="bookHistoryNext" type="button" class="secondary">历史较早页</button></div>`;
   box.after(historyBox);
   let historyCode='',historyPage=0,historyKey='',historyData=null;
   function historyTickTime(value){
@@ -1196,11 +1453,64 @@ const bookRecorder = (() => {
   panel.after(ledgerBox);
   $('bookStatsCSV').after($('bookLedgerCSV'));
   const threePanel=document.createElement('section');threePanel.id='bookThreeSecondPanel';threePanel.style.cssText='margin:12px 0;padding:12px;border:1px solid #c9dfd3;border-radius:9px;background:#f7fcf9;line-height:1.8';
-  threePanel.innerHTML=`<h3 style="margin:0">实时汇总：逐档增减，按成交明细更新结算</h3><p id="bookAdditionAt" class="small"></p><p id="bookThreeSource" class="small" style="font-weight:600"></p><div style="display:flex;gap:12px 24px;flex-wrap:wrap"><div style="flex:1;min-width:230px"><strong id="bookBidAddition">买盘累计加单率：—</strong><div id="bookBidAdditionDetail" class="small"></div></div><div style="flex:1;min-width:230px"><strong id="bookAskAddition">卖盘累计加单率：—</strong><div id="bookAskAdditionDetail" class="small"></div></div></div><p class="hint">每档累加每次正负变化；成交更新结算：加单＝观察增加＋max(0，该档成交－观察减少)，撤单＝max(0，观察减少－该档成交)，净加单＝加单－撤单，可为负。每次更新全部五档都统计，无成交按0；逐档算完再合计。共同分母为观察期全部去重成交，含五档外。更新时间不固定；尚未结算的变化仍完整记录。分母为0不显示百分比。</p><button id="bookThreeCSV" class="secondary" type="button">导出全部成交更新区间 CSV</button><p id="bookThreeSummary" class="small"></p><div class="table-wrap" style="max-height:360px"><table style="min-width:1450px"><thead><tr><th>成交更新区间（北京）</th><th>共同成交量（手，仅一份）</th><th>买盘加单（手）</th><th>买盘撤单（手）</th><th>买盘净加单（手）</th><th>买盘加单率</th><th>买盘撤单率</th><th>买盘净加单率</th><th>卖盘加单（手）</th><th>卖盘撤单（手）</th><th>卖盘净加单（手）</th><th>卖盘加单率</th><th>卖盘撤单率</th><th>卖盘净加单率</th><th>五档可见状态（变动项数）</th><th>采样说明</th><th>各档计算明细</th></tr></thead><tbody id="bookThreeRows"></tbody></table></div>`;
+  threePanel.innerHTML=`<h3 style="margin:0">成交更新明细</h3><p id="bookAdditionAt" class="small"></p><p id="bookThreeSource" class="small"></p><div hidden><strong id="bookBidAddition"></strong><div id="bookBidAdditionDetail"></div><strong id="bookAskAddition"></strong><div id="bookAskAdditionDetail"></div></div><button id="bookThreeCSV" class="secondary" type="button">导出全部成交更新区间 CSV</button><p id="bookThreeSummary" class="small" role="status"></p><div id="bookTradeDetailGrid" class="book-side-grid">${[['bid','Bid','买盘'],['ask','Ask','卖盘']].map(([side,suffix,label])=>`<section id="bookTrade${suffix}" class="book-side-card" aria-labelledby="bookTrade${suffix}Title"><h3 id="bookTrade${suffix}Title">${label}成交更新明细</h3><p class="small">按成交更新逐次列出 · 数量单位：手</p><div class="table-wrap" style="max-height:460px" role="region" aria-label="${label}成交更新明细表，可横向滚动" tabindex="0"><table style="min-width:1080px"><thead><tr>${['成交更新区间（北京）','结算确认时间（北京）','本区间共同成交量（手）','观察增加（手）','合计减少（手）','成交抵扣（手）','加单（手）','撤单（手）','净加单（手）','加单率','撤单率','净加单率'].map(text=>`<th>${text}</th>`).join('')}</tr></thead><tbody id="bookThree${suffix}Rows"></tbody></table></div></section>`).join('')}</div>`;
   panel.after(threePanel);
   const auditPanel=document.createElement('details');auditPanel.id='bookAuditPanel';auditPanel.style.cssText='margin:12px 0;padding:12px;border:1px solid #cbd8e7;border-radius:9px;background:#fbfcff;line-height:1.8';
   auditPanel.innerHTML=`<summary style="cursor:pointer;font-size:1.17em;font-weight:700">上下数量核对：实时快照 ↔ 成交更新汇总（点击展开/收起）</summary><p class="small">从下方保存的原始快照重新按同侧、同价格及相同成交更新区间计算，再核对上方窗口增减量、成交分母和累计值；同时检查原始变化行是否与快照相符。进入、移出五档不推断加撤，原始缺失值不改。差额＝上方统计−原始重算；0表示该项数量一致。</p><p id="bookAuditStatus" role="status" style="font-weight:600">等待可比较的盘口快照。</p><p id="bookAuditCumulative" class="small"></p><div class="table-wrap" style="max-height:320px"><table style="min-width:1080px"><thead><tr><th>成交更新区间（北京）</th><th>核对状态</th><th>原始快照数 / 比较次数</th><th>买增加差（手）</th><th>买减少差（手）</th><th>卖增加差（手）</th><th>卖减少差（手）</th><th>成交量差（手）</th><th>核对说明</th></tr></thead><tbody id="bookAuditRows"></tbody></table></div><p class="hint">每次响应后核对当前已结算的成交更新区间，一致不代表源数据完整；仅核对可观测数量，不是交易所逐委托订单核销；资料不足、待确认或排除的时段不会冒充“核对一致”。滑动趋势图按选点之前已收到的数据重新核对。全部核对结果随原始记录JSON导出。</p>`;
   threePanel.after(auditPanel);
+  // Presentation only: reuse existing nodes, IDs, listeners and server-calculated values.
+  const pairedBookFields=[
+    ['added_shares','累计加单（手）'],
+    ['cancellation_shares','累计撤单（手）'],
+    ['net_change_shares','净加单（手）'],
+    ['net_addition_rate_pct','净加单率'],
+    ['observed_reduction_shares','合计减少（手）'],
+    ['trade_credit_shares','成交抵扣（手）'],
+    ['denominator_trade_shares','共同成交量（手）']
+  ];
+  const pairedBookCells=new Map();
+  function initPairedBook(){
+    const legacy=document.createElement('div');legacy.hidden=true;legacy.style.setProperty('display','none','important');legacy.setAttribute('aria-hidden','true');
+    const explanation=panel.querySelector('p.small'),additionExplanation=threePanel.querySelector('p.hint');
+    const at=$('bookFlowAt'),volume=$('bookFlowVolume'),instant=$('bookFlowInstant'),coverage=$('bookFlowCoverage');
+    const heading=document.createElement('h2');heading.className='book-comparison-title';heading.textContent='五档加单与撤单';
+    const grid=document.createElement('div');grid.className='book-side-grid';
+    for(const [side,suffix,title]of[['bid','Bid','买盘五档'],['ask','Ask','卖盘五档']]){
+      const card=document.createElement('section');card.id='bookSide'+suffix;card.className='book-side-card';card.setAttribute('aria-labelledby','bookSide'+suffix+'Title');
+      const h=document.createElement('h3');h.id='bookSide'+suffix+'Title';h.textContent=title;card.append(h);
+      for(const id of ['bookFlow'+suffix,'book'+suffix+'Addition']){const row=document.createElement('div');row.className='book-side-rate';const node=$(id);node.className='book-side-primary';row.append(node);card.append(row);}
+      for(const id of ['bookFlow'+suffix+'Detail','book'+suffix+'AdditionDetail'])legacy.append($(id));
+      const dl=document.createElement('dl');dl.id='bookSide'+suffix+'Fields';dl.className='book-side-fields';
+      for(const [key,label]of pairedBookFields){const row=document.createElement('div');row.dataset.field=key;const dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=label;dd.textContent='—';row.append(dt,dd);dl.append(row);pairedBookCells.set(side+':'+key,dd);}
+      card.append(dl);grid.append(card);
+    }
+    legacy.append($('bookAdditionAt'),$('bookThreeSource'));
+    panel.removeAttribute('style');panel.className='book-comparison';panel.replaceChildren(heading,at,volume,grid,instant,coverage,legacy);
+    const recordsCard=document.createElement('section');recordsCard.id='bookRecordsPanel';recordsCard.className='card';recordsCard.setAttribute('aria-labelledby','bookRecordsTitle');
+    const recordsHeading=document.createElement('h2');recordsHeading.id='bookRecordsTitle';recordsHeading.textContent='记录';recordsCard.append(recordsHeading);
+    const trades=$('thsdkTicks');trades.before(recordsCard);
+    const table=$('bookTradeDetailGrid'),exportButton=$('bookThreeCSV'),summary=$('bookThreeSummary');
+    const transactionHeading=document.createElement('h3');transactionHeading.textContent='成交更新明细';threePanel.replaceChildren(transactionHeading,exportButton,summary,table);
+    for(const section of [threePanel,trades,ledgerBox,auditPanel,box]){section.classList.remove('card');section.classList.add('book-record-subsection');if(section===threePanel||section===ledgerBox||section===auditPanel)section.removeAttribute('style');recordsCard.append(section);}
+    ledgerBox.querySelector('label').after($('bookLedgerCSV'));
+    ledgerBox.hidden=false;ledgerBox.removeAttribute('aria-hidden');
+    auditPanel.hidden=true;auditPanel.setAttribute('aria-hidden','true');auditPanel.style.setProperty('display','none','important');
+    const ledgerHead=ledgerBox.querySelector('thead tr');ledgerHead.replaceChildren(...['时间','盘口 / 价格','挂量变化（手）','变动（手）'].map(text=>{const th=document.createElement('th');th.textContent=text;return th;}));
+    ledgerBox.querySelector('table').style.minWidth='0';
+    const ledgerWrap=ledgerBox.querySelector('.table-wrap'),ledgerSides=document.createElement('div');ledgerSides.className='book-ledger-sides';
+    for(const [side,suffix,label]of [['bid','Bid','买盘'],['ask','Ask','卖盘']]){
+      const section=document.createElement('section');section.id='bookLedger'+suffix;section.className='book-ledger-side';section.setAttribute('aria-labelledby','bookLedger'+suffix+'Title');
+      const title=document.createElement('h4');title.id='bookLedger'+suffix+'Title';title.textContent=label+'明细';section.append(title);
+      const wrap=ledgerWrap.cloneNode(true);wrap.querySelector('tbody').id=side==='bid'?'bookLedgerRows':'bookLedgerAskRows';wrap.setAttribute('role','region');wrap.setAttribute('aria-label',label+'价位变化明细');section.append(wrap);ledgerSides.append(section);
+    }
+    ledgerWrap.replaceWith(ledgerSides);$('bookLedgerPrev').parentElement.classList.add('book-ledger-pager');
+    const methods=document.createElement('details');methods.className='book-record-subsection';const methodsTitle=document.createElement('summary');methodsTitle.textContent='加单与撤单统计说明';methods.append(methodsTitle);if(explanation)methods.append(explanation);if(additionExplanation)methods.append(additionExplanation);recordsCard.append(methods);
+  }
+  function renderPairedBook(snapshot){
+    for(const side of ['bid','ask']){const metric=snapshot?.[side];for(const [key]of pairedBookFields){const cell=pairedBookCells.get(side+':'+key);if(cell)cell.textContent=!metric?'—':key==='net_addition_rate_pct'?fmtTradeRate(metric[key],metric.denominator_trade_shares):fmtLots(metric[key]);}}
+  }
+  initPairedBook();
+
   function renderAudit(result,cutoff){
     const all=(result?.integrity_audit?.windows||[]).filter(w=>Date.parse(w.confirmed_at)<=cutoff),pass=all.filter(w=>w.status==='pass').length,mismatch=all.filter(w=>w.status==='mismatch').length,incomplete=all.filter(w=>w.status!=='pass'&&w.status!=='mismatch').length;
     $('bookAuditStatus').textContent=all.length?`${viewTime?'截至所选时刻':'当前'}已核对 ${all.length} 窗：一致 ${pass} 窗，差异 ${mismatch} 窗，资料不足 ${incomplete} 窗。`:'等待可比较的盘口快照；尚未宣称核对一致。';
@@ -1209,35 +1519,179 @@ const bookRecorder = (() => {
     $('bookAuditCumulative').textContent=last?`同期累计差额（上层−原始重算）：买增加 ${fmtLots(d?.bid_added_shares)} 手，买减少 ${fmtLots(d?.bid_reduced_shares)} 手，卖增加 ${fmtLots(d?.ask_added_shares)} 手，卖减少 ${fmtLots(d?.ask_reduced_shares)} 手，成交 ${fmtLots(d?.source_trade_volume_shares)} 手。显示最近20窗，其余完整保留。`:'';
     $('bookAuditRows').replaceChildren(...all.slice(-20).reverse().map(w=>{const tr=document.createElement('tr'),clock=t=>tickSourceTime(t).split(' ').at(-1),values=[`${clock(w.start)} → ${clock(w.end)}`,w.status==='pass'?'数量一致':w.status==='mismatch'?'存在差异':'资料不足',`${w.raw_snapshot_count??'—'} / ${w.raw_comparisons??'—'}`,fmtLots(w.delta?.bid_added_shares),fmtLots(w.delta?.bid_reduced_shares),fmtLots(w.delta?.ask_added_shares),fmtLots(w.delta?.ask_reduced_shares),fmtLots(w.delta?.source_trade_volume_shares),(w.issues||[]).join('；')||(w.status==='pass'?'快照、变化行、成交分母及累计值一致':'未判定一致')];for(const value of values){const td=document.createElement('td');td.textContent=String(value);tr.appendChild(td);}return tr;}));
   }
+/* 下方买卖逐价结算明细替换实现：只读 result，不依赖 visibility_changes。 */
+function momentFinite(value) {
+  return Number.isFinite(value) ? value : null;
+}
+function momentTimeMs(value) {
+  if (value === null || value === undefined || value === '') return NaN;
+  const n = Number(value);
+  if (Number.isFinite(n) && n >= 1500000000 && n <= 2200000000) return n * 1000;
+  if (Number.isFinite(n) && n > 2200000000) return n;
+  const t = Date.parse(value);
+  return Number.isFinite(t) ? t : NaN;
+}
+function momentBeforeCutoff(value, cutoff) {
+  const t = momentTimeMs(value), c = momentTimeMs(cutoff);
+  return Number.isFinite(t) && (cutoff === Infinity || Number.isFinite(c) && t <= c);
+}
+function momentText(value) {
+  return Number.isFinite(momentTimeMs(value)) ? tickSourceTime(momentTimeMs(value)) : '未知';
+}
+function momentAmount(value) {
+  const n = momentFinite(value);
+  return n === null ? '未知' : fmtLots(n);
+}
+function momentPrice(value) {
+  const n = momentFinite(value);
+  return n === null ? '未知' : String(value);
+}
+function momentCell(label, value) {
+  const td = document.createElement('td');
+  td.className = 'book-moment-field';
+  td.dataset.label = label;
+  const span = document.createElement('span');
+  span.className = 'book-moment-label';
+  span.textContent = label;
+  const strong = document.createElement('strong');
+  strong.textContent = String(value);
+  td.append(span, strong);
+  return td;
+}
+function momentRow(labels, values, className) {
+  const tr = document.createElement('tr');
+  if (className) tr.className = className;
+  labels.forEach((label, i) => tr.append(momentCell(label, values[i])));
+  return tr;
+}
+function momentIntervalKey(item) {
+  return `${momentTimeMs(item?.start ?? item?.interval_start)}|${momentTimeMs(item?.end ?? item?.interval_end)}`;
+}
+function momentReconciliationLevels(result, window) {
+  const direct = Array.isArray(window?.levels) ? window.levels : [];
+  if (direct.length) return direct.slice();
+  const key = momentIntervalKey(window);
+  const matches = (result?.reconciliation || []).filter(r => momentIntervalKey(r) === key);
+  return matches.flatMap(r => Array.isArray(r.levels) ? r.levels : (r.side ? [r] : []));
+}
+function momentMetricTotal(levels, key) {
+  if (!levels.length) return null;
+  let total = 0;
+  for (const level of levels) {
+    const n = momentFinite(level?.[key]);
+    if (n === null) return null;
+    total += n;
+  }
+  return total;
+}
+function momentObservationTime(level) {
+  const obs = Array.isArray(level?.observations) ? level.observations : [];
+  const values = obs.map(o => o?.received_at ?? o?.time ?? o?.at ?? o).filter(v => Number.isFinite(momentTimeMs(v)));
+  return values.length ? values.map(momentText).join('、') : '未知';
+}
+function momentTradeRecordTime(record) {
+  return momentText(record?.row?.time);
+}
+function momentCreateTradeSection() {
+  let section = document.getElementById('bookCommonTradeDetails');
+  if (section) return section;
+  section = document.createElement('section');
+  section.id = 'bookCommonTradeDetails';
+  section.className = 'book-side-card';
+  const h = document.createElement('h3');
+  h.textContent = '共同成交逐笔明细（不归属买盘或卖盘）';
+  const note = document.createElement('p');
+  note.className = 'small';
+  note.textContent = '仅按真实成交时间与接收时间筛选；不读取或使用成交方向标签。';
+  const body = document.createElement('div');
+  body.className = 'book-common-trade-body';
+  section.append(h, note, body);
+  const grid = document.getElementById('bookTradeDetailGrid');
+  if (grid?.parentNode) grid.parentNode.insertBefore(section, grid);
+  return section;
+}
+function momentRenderCommonTrades(result, windows, cutoff, clear) {
+  const section = momentCreateTradeSection();
+  const body = section.querySelector('.book-common-trade-body');
+  body.replaceChildren();
+  if (clear || !windows.length) {
+    const p = document.createElement('p'); p.className = 'small'; p.textContent = clear ? '暂无可显示的共同成交明细（已清空）。' : '暂无符合时间条件的共同成交区间。'; body.append(p); return;
+  }
+  for (const w of windows) {
+    const details = document.createElement('details');
+    const summary = document.createElement('summary');
+    const records = (Array.isArray(w.source_trade_records) ? w.source_trade_records : []).filter(r => momentBeforeCutoff(r?.first_received_at, cutoff) && momentBeforeCutoff(r?.row?.time, cutoff));
+    const declared = momentFinite(w.source_trade_volume_shares);
+    let rowTotal = 0, rowTotalKnown = true;
+    for (const r of records) { const n = momentFinite(r?.row?.volume); if (n === null) rowTotalKnown = false; else rowTotal += n; }
+    const total = declared === null && rowTotalKnown && records.length ? rowTotal : declared;
+    summary.textContent = `${momentText(w.start)} → ${momentText(w.end)}｜共同成交 ${momentAmount(total)} 手｜逐笔 ${records.length} 条`;
+    details.append(summary);
+    const wrap = document.createElement('div'); wrap.className = 'table-wrap';
+    const table = document.createElement('table'); table.style.minWidth = '620px';
+    const thead = document.createElement('thead');
+    const hr = document.createElement('tr'); ['成交真实时间','接收时间','真实价位','成交量（手）'].forEach(x => { const th = document.createElement('th'); th.textContent = x; hr.append(th); });
+    thead.append(hr); table.append(thead);
+    const tb = document.createElement('tbody');
+    for (const r of records) tb.append(momentRow(['成交真实时间','接收时间','真实价位','成交量（手）'], [momentTradeRecordTime(r), momentText(r.first_received_at), momentPrice(r?.row?.price), momentAmount(r?.row?.volume)]));
+    const knownSum = records.reduce((s, r) => { const n = momentFinite(r?.row?.volume); return n === null ? s : s + n; }, 0);
+    if (declared !== null && Math.abs(knownSum - declared) > 1e-9) tb.append(momentRow(['成交真实时间','接收时间','真实价位','成交量（手）'], ['区间汇总余量，未匹配逐笔','未知','未知', momentAmount(declared - knownSum)], 'book-moment-remainder'));
+    if (!records.length && declared === null) tb.append(momentRow(['成交真实时间','接收时间','真实价位','成交量（手）'], ['暂无逐笔记录','未知','未知','未知']));
+    if (!records.length && declared === 0) tb.append(momentRow(['成交真实时间','接收时间','真实价位','成交量（手）'], ['本区间已确认零成交',momentText(w.confirmed_at),'不适用','0']));
+    table.append(tb); wrap.append(table); details.append(wrap); body.append(details);
+  }
+}
+function renderMomentDetails(result, cutoff, clear) {
+  const allWindows = clear ? [] : (Array.isArray(result?.windows) ? result.windows : []).filter(w => momentBeforeCutoff(w?.confirmed_at, cutoff));
+  const ordered = allWindows.slice().sort((a, b) => momentTimeMs(b?.end) - momentTimeMs(a?.end));
+  const visible = ordered.slice(0, 60);
+  const labels = ['区间','真实价位','前量（手）','后量（手）','观察增加（手）','减少（手）','成交抵扣（手）','加单（手）','撤单（手）','净加单（手）','原始采样时间'];
+  for (const [side, suffix, title] of [['bid', 'Bid', '买盘'], ['ask', 'Ask', '卖盘']]) {
+    const summary = document.getElementById(`bookMoment${suffix}Summary`);
+    if (summary) summary.textContent = `${title}区间共 ${allWindows.length} 个，显示最近 ${visible.length} 个；每区间先显示汇总，再显示逐价位明细。数量单位：手，未知不填补为零。`;
+    const rows = [];
+    for (const w of visible) {
+      const metric = w?.[side] || {};
+      const levels = momentReconciliationLevels(result, w).filter(l => l?.side === side);
+      const interval = `${momentText(w.start)} → ${momentText(w.end)}`;
+      rows.push(momentRow(labels, [interval, levels.length ? '区间汇总（非单一价位）' : '区间汇总（逐价资料未匹配）', '不适用', '不适用', momentAmount(metric.visible_added_shares), momentAmount(metric.observed_reduction_shares), momentAmount(metric.trade_credit_shares), momentAmount(metric.added_shares), momentAmount(metric.cancellation_shares), momentAmount(metric.net_change_shares), '结算确认：'+momentText(w.confirmed_at)], 'book-moment-interval-summary'));
+      const keys = ['visible_added_shares','observed_reduction_shares','trade_credit_shares','added_shares','cancellation_shares','net_change_shares'];
+      for (const key of keys) {
+        const m = momentFinite(metric[key]), sum = momentMetricTotal(levels, key);
+        if (m !== null && sum !== null && Math.abs(m - sum) > 1e-9) {
+          const amounts=keys.map(k=>k===key?momentAmount(m-sum):'不适用');
+          rows.push(momentRow(labels, [interval, '区间汇总余量，未匹配价位', '未知', '未知', ...amounts, '结算确认：'+momentText(w.confirmed_at)], 'book-moment-remainder'));
+        }
+      }
+      for (const l of levels) rows.push(momentRow(labels, [interval, momentPrice(l.price), momentAmount(l.before_shares), momentAmount(l.after_shares), momentAmount(l.visible_added_shares), momentAmount(l.observed_reduction_shares), momentAmount(l.trade_credit_shares), momentAmount(l.added_shares), momentAmount(l.cancellation_shares), momentAmount(l.net_change_shares), momentObservationTime(l)], 'book-moment-level'));
+    }
+    if (!rows.length) rows.push(momentRow(['区间','明细'], [clear ? '暂无可显示的逐价位明细。' : `当前会话暂无已结算区间；已保存 ${result?.snapshots ?? '未知'} 次盘口快照，统计排除 ${result?.excluded_intervals ?? '未知'} 段。`], 'book-moment-empty'));
+    const target = document.getElementById(`bookMoment${suffix}Rows`); if (target) target.replaceChildren(...rows);
+  }
+}
+
   let threeRenderKey='';
   function renderThreeSecond(result,cutoff,snapshot=null,clear=false){
+    renderPairedBook(snapshot);
+    // Restored original settlement-only detail component; upper values unchanged.
     const entries=clear?[]:(result?.windows||[]).filter(w=>Date.parse(w.confirmed_at)<=cutoff);
     $('bookAdditionAt').textContent=snapshot?`${viewTime?'截至所选时刻':'最新累计'}｜盘口已更新至 ${tickSourceTime(snapshot.through)}。`:'等待可比较的盘口快照。';
     const volume=snapshot?.bid?.denominator_trade_shares;
     const volumeText=snapshot?`共同成交量：${fmtLots(volume)} 手（观察期全部去重成交，含五档内外，每笔只计一次）`:'共同成交量：等待成交明细更新结算；盘口每次变化均已独立记录。';
     $('bookThreeSource').textContent=volumeText;$('bookFlowVolume').textContent=volumeText;
-    for(const [side,suffix,label]of[['bid','Bid','买盘'],['ask','Ask','卖盘']]){const m=snapshot?.[side];$('book'+suffix+'Addition').textContent=`${label}累计加单率：${fmtTradeRate(m?.addition_rate_pct,m?.denominator_trade_shares)}`;$('book'+suffix+'AdditionDetail').textContent=m?`加单 ${fmtLots(m.added_shares)} 手；撤单 ${fmtLots(m.cancellation_shares)} 手；观察减少 ${fmtLots(m.observed_reduction_shares)} 手；净加单 ${fmtLots(m.net_change_shares)} 手；净加单率 ${fmtTradeRate(m.net_addition_rate_pct,m.denominator_trade_shares)}；共同成交分母 ${fmtLots(m.denominator_trade_shares)} 手。`:'';}
-    $('bookThreeSummary').textContent=`已结算 ${entries.length} 次成交更新，买盘、卖盘分别显示全部 ${entries.length} 次，最新在前，可在表内上下滚动查看。待下次成交更新结算 ${result?.pending_intervals||0} 次。各行数量和比率均为该次更新区间值；共同成交量在两框中重复列示用于对照，不相加。全部记录仍可导出。`;
+    for(const [side,suffix,label]of[['bid','Bid','买盘'],['ask','Ask','卖盘']]){const m=snapshot?.[side];$('book'+suffix+'Addition').textContent=`${label}累计加单率：${fmtTradeRate(m?.addition_rate_pct,m?.denominator_trade_shares)}`;$('book'+suffix+'AdditionDetail').textContent=m?`加单 ${fmtLots(m.added_shares)} 手；撤单 ${fmtLots(m.cancellation_shares)} 手；合计减少 ${fmtLots(m.observed_reduction_shares)} 手；净加单 ${fmtLots(m.net_change_shares)} 手；净加单率 ${fmtTradeRate(m.net_addition_rate_pct,m.denominator_trade_shares)}；共同成交分母 ${fmtLots(m.denominator_trade_shares)} 手。`:'';}
+    $('bookThreeSummary').textContent=`已结算 ${entries.length} 次成交更新，买盘、卖盘分别显示全部 ${entries.length} 次，最新在前，可在表内上下滚动查看。待结算盘口比较 ${result?.pending_intervals||0} 次。各行数量和比率均为该次更新区间值；共同成交量在两框中重复列示用于对照，不相加。全部记录仍可导出。`;
     const visible=[...entries].reverse(),key=JSON.stringify([sessions.get(state.code)?.id,visible]);if(!clear&&key===threeRenderKey)return;threeRenderKey=key;
-    $('bookThreeRows').replaceChildren(...visible.map(w=>{
-      const tr=document.createElement('tr'),clock=t=>tickSourceTime(t).split(' ').at(-1);
-      tr.dataset.uiInterval=`${clock(w.start)} → ${clock(w.end)}`;
-      tr.dataset.uiConfirmed=tickSourceTime(w.confirmed_at);
-      tr.dataset.uiVolume=fmtLots(w.source_trade_volume_shares);
-      for(const [side,suffix]of[['bid','Bid'],['ask','Ask']]){
-        const m=w[side]||{},prefix='ui'+suffix;
-        for(const [key,value]of Object.entries({VisibleAdded:fmtLots(m.visible_added_shares),ObservedReduction:fmtLots(m.observed_reduction_shares),TradeCredit:fmtLots(m.trade_credit_shares),Added:fmtLots(m.added_shares),Cancelled:fmtLots(m.cancellation_shares),Net:fmtLots(m.net_change_shares),AdditionRate:fmtTradeRate(m.addition_rate_pct,m.denominator_trade_shares),ReductionRate:fmtTradeRate(m.reduction_rate_pct,m.denominator_trade_shares),NetRate:fmtTradeRate(m.net_addition_rate_pct,m.denominator_trade_shares)}))tr.dataset[prefix+key]=value;
-      }
-      const values=[tr.dataset.uiInterval,fmtLots(w.source_trade_volume_shares)];
-      for(const side of['bid','ask']){const m=w[side];values.push(fmtLots(m.added_shares),fmtLots(m.cancellation_shares),fmtLots(m.net_change_shares),fmtTradeRate(m.addition_rate_pct,m.denominator_trade_shares),fmtTradeRate(m.reduction_rate_pct,m.denominator_trade_shares),fmtTradeRate(m.net_addition_rate_pct,m.denominator_trade_shares));}
-      values.push(`同价变化 ${w.visibility_counts?.in_five_same_price||0} 项；进入 ${w.visibility_counts?.entered_five||0} 项；移出 ${w.visibility_counts?.left_five||0} 项`);
-      values.push(`成交更新结算；${w.sample_pairs}次盘口比较；无匹配成交的档位按0${w.ambiguous_trade_shares?'；有归侧不明成交，仅计分母':''}`);
-      for(const value of values){const td=document.createElement('td');td.textContent=String(value);tr.appendChild(td);}
-      const td=document.createElement('td'),details=document.createElement('details'),summary=document.createElement('summary'),pre=document.createElement('pre');
-      summary.textContent='逐档增减与净加单率';pre.style.cssText='white-space:pre-wrap;font-size:11px;max-width:420px';
-      pre.textContent=(w.levels||[]).map(z=>`${z.side==='bid'?'买':'卖'} ${z.price}：加 ${fmtLots(z.added_shares)}；减 ${fmtLots(z.observed_reduction_shares)}；成交 ${fmtLots(z.executed_shares)}；撤 ${fmtLots(z.cancellation_shares)}；净加 ${fmtLots(z.net_change_shares)} 手；净加单率 ${fmtTradeRate(z.net_addition_rate_pct,z.denominator_trade_shares)}\n`+(z.observations||[]).map(o=>`  ${clock(o.received_at)} ${o.delta_shares>=0?'+':''}${fmtLots(o.delta_shares)} 手`).join('\n')).join('\n');
-      details.append(summary,pre);td.append(details);tr.append(td);return tr;
-    }));
+    for(const [side,suffix]of[['bid','Bid'],['ask','Ask']]){
+      const rows=visible.map(w=>{
+        const tr=document.createElement('tr'),m=w[side]||{};
+        const values=[`${tickSourceTime(w.start).split(' ').at(-1)} → ${tickSourceTime(w.end).split(' ').at(-1)}`,tickSourceTime(w.confirmed_at),fmtLots(w.source_trade_volume_shares),fmtLots(m.visible_added_shares),fmtLots(m.observed_reduction_shares),fmtLots(m.trade_credit_shares),fmtLots(m.added_shares),fmtLots(m.cancellation_shares),fmtLots(m.net_change_shares),fmtTradeRate(m.addition_rate_pct,m.denominator_trade_shares),fmtTradeRate(m.reduction_rate_pct,m.denominator_trade_shares),fmtTradeRate(m.net_addition_rate_pct,m.denominator_trade_shares)];
+        const labels=[...$('bookThree'+suffix+'Rows').closest('table').querySelectorAll('thead th')].map(th=>th.textContent);for(const [index,value] of values.entries()){const td=document.createElement('td');td.dataset.label=labels[index];td.textContent=String(value);tr.append(td);}
+        return tr;
+      });
+      if(!rows.length){const tr=document.createElement('tr'),td=document.createElement('td');td.colSpan=12;td.textContent=clear?'暂无可显示的成交更新记录。':'尚无已结算的成交更新，实时快照仍在下方保留。';tr.append(td);rows.push(tr);}
+      $('bookThree'+suffix+'Rows').replaceChildren(...rows);
+    }
   }
   $('bookThreeCSV').addEventListener('click',()=>void exportData('three'));
   let ledgerPage=0,ledgerSession='',ledgerRenderKey='';const ledgerRowNodes=new Map();
@@ -1246,27 +1700,32 @@ const bookRecorder = (() => {
     const all=forceEmpty?[]:(result?.visibility_changes||[]).filter(r=>Date.parse(r.confirmed_at)<=cutoff),filter=$('bookLedgerFilter').value,filtered=all.filter(r=>filter==='all'||r.side===filter||r.visibility_state===filter),pages=Math.max(1,Math.ceil(filtered.length/30));ledgerPage=Math.min(ledgerPage,pages-1);
     $('bookLedgerSummary').textContent=`已记录 ${all.length} 项价位变化；时间、价格及数量完整保留。`;$('bookLedgerPage').textContent=`第 ${ledgerPage+1}/${pages} 页；${filtered.length}项`;$('bookLedgerPrev').disabled=ledgerPage===0;$('bookLedgerNext').disabled=ledgerPage>=pages-1;
     const visible=[...filtered].reverse().slice(ledgerPage*30,(ledgerPage+1)*30),key=JSON.stringify([sid,filter,ledgerPage,visible]);if(key===ledgerRenderKey)return;ledgerRenderKey=key;
-    $('bookLedgerRows').replaceChildren(...visible.map(r=>{const nodeKey=JSON.stringify([r.id,r.statistics_eligible]);if(ledgerRowNodes.has(nodeKey))return ledgerRowNodes.get(nodeKey);const tr=document.createElement('tr'),clock=t=>tickSourceTime(t).split(' ').at(-1),values=[`${clock(r.interval_start)} → ${clock(r.interval_end)}`,`${r.side==='bid'?'买盘':'卖盘'} / ${r.price}`,`${fmtLots(r.before_shares)} → ${fmtLots(r.after_shares)}`,fmtLots(r.delta_shares===null?null:Math.max(r.delta_shares,0)),fmtLots(r.delta_shares===null?null:Math.max(-r.delta_shares,0)),fmtLots(r.delta_shares)];for(const value of values){const td=document.createElement('td');td.textContent=value;tr.appendChild(td);}const td=document.createElement('td'),details=document.createElement('details'),summary=document.createElement('summary'),proof=document.createElement('pre');summary.textContent='展开原始快照';proof.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;max-width:420px';proof.textContent=JSON.stringify({side:r.side,price:r.price,window_start:r.interval_start,window_end:r.interval_end,source_span_start:r.source_span_start,source_span_end:r.source_span_end,before_shares:r.before_shares,after_shares:r.after_shares,delta_shares:r.delta_shares,before_level:r.before_level,after_level:r.after_level,statistics_eligible:r.statistics_eligible,observations:r.observations,trade_attribution:'not_performed',cancellation_amount:null},null,2);details.append(summary,proof);td.appendChild(details);tr.appendChild(td);ledgerRowNodes.set(nodeKey,tr);return tr;}));
+    const ledgerNodes=visible.map(r=>{
+      const nodeKey=JSON.stringify([r.id,r.statistics_eligible]);if(ledgerRowNodes.has(nodeKey))return ledgerRowNodes.get(nodeKey);
+      const tr=document.createElement('tr'),clock=t=>tickSourceTime(t).split(' ').at(-1);
+      const sideKnown=r.side==='bid'||r.side==='ask',priceKnown=Number.isFinite(r.price)&&r.price>0;
+      const beforeKnown=Number.isFinite(r.before_shares),afterKnown=Number.isFinite(r.after_shares),deltaKnown=Number.isFinite(r.delta_shares);
+      const positionKnown=sideKnown&&priceKnown,changeKnown=beforeKnown&&afterKnown&&deltaKnown;
+      const position=positionKnown?`${r.side==='bid'?'买盘':'卖盘'} / ${r.price}`:'位置未知';
+      const quantity=`${beforeKnown?fmtLots(r.before_shares):'—'} → ${afterKnown?fmtLots(r.after_shares):'—'}`;
+      const leftFive=positionKnown&&r.visibility_state==='left_five'&&beforeKnown&&r.after_shares===null&&r.delta_shares===null;
+      const change=leftFive?'脱离五档':positionKnown&&!changeKnown?'位置未知':positionKnown&&changeKnown?`${r.delta_shares>0?'+':''}${fmtLots(r.delta_shares)}`:'—';
+      const labels=['时间','盘口 / 价格','挂量变化（手）','变动（手）'];
+      for(const [i,value]of [`${clock(r.interval_start)} → ${clock(r.interval_end)}`,position,quantity,change].entries()){const td=document.createElement('td');td.dataset.label=labels[i];td.textContent=value;tr.append(td);}
+      ledgerRowNodes.set(nodeKey,tr);return tr;
+    });
+    for(const [side,id,suffix]of [['bid','bookLedgerRows','Bid'],['ask','bookLedgerAskRows','Ask']]){
+      $('bookLedger'+suffix).hidden=filter!=='all'&&filter!==side;
+      const nodes=ledgerNodes.filter((node,i)=>visible[i].side===side);
+      if(!nodes.length){const tr=document.createElement('tr'),td=document.createElement('td');td.colSpan=4;td.textContent='本页暂无'+(side==='bid'?'买盘':'卖盘')+'价位变化记录';tr.append(td);nodes.push(tr);}
+      $(id).replaceChildren(...nodes);
+    }
     if(ledgerRowNodes.size>1500){const keep=new Set(visible.map(r=>JSON.stringify([r.id,r.statistics_eligible])));for(const id of ledgerRowNodes.keys())if(!keep.has(id))ledgerRowNodes.delete(id);}
   }
   function refreshLedgerView(){ledgerRenderKey='';renderStats();}
   $('bookLedgerFilter').addEventListener('change',()=>{ledgerPage=0;refreshLedgerView();});$('bookLedgerPrev').addEventListener('click',()=>{ledgerPage=Math.max(0,ledgerPage-1);refreshLedgerView();});$('bookLedgerNext').addEventListener('click',()=>{ledgerPage++;refreshLedgerView();});$('bookLedgerCSV').addEventListener('click',()=>void exportData('ledger'));
 
-  function db() {
-    if (!dbPromise) dbPromise = new Promise((resolve, reject) => {
-      if (!window.indexedDB) { reject(Error('此浏览器不支持 IndexedDB')); return; }
-      const r = indexedDB.open('thsdk-orderbook-recorder-v1', 1);
-      r.onupgradeneeded = () => {
-        for (const [name, key, auto] of [['events', 'id', true], ['ticks', 'id', false], ['latest', 'code', false]]) {
-          const s = r.result.createObjectStore(name, { keyPath: key, autoIncrement: auto });
-          if (name !== 'latest') s.createIndex('code', 'code');
-        }
-      };
-      r.onsuccess = () => { r.result.onversionchange = () => r.result.close(); resolve(r.result); };
-      r.onerror = () => reject(r.error); r.onblocked = () => reject(Error('记录库被其他页面阻塞，请关闭旧页面后刷新'));
-    });
-    return dbPromise;
-  }
+  function db(){return window.StableRecords.recordDB.open();}
   function request(r) { return new Promise((ok, no) => { r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); }); }
   function complete(tx) { return new Promise((ok, no) => { tx.oncomplete = ok; tx.onerror = () => no(tx.error); tx.onabort = () => no(tx.error || Error('保存中断')); }); }
   const beijingDay = t => new Date(new Date(t).getTime() + 8 * 3600000).toISOString().slice(0, 10);
@@ -1288,38 +1747,20 @@ const bookRecorder = (() => {
     const c = { events, ticks: new Map(ticks.map(t => [t.id, t])), dirty: true, computed: 0, result: null };
     caches.set(code, c); return c;
   }
-  function recompute(code, force = false, cutoff = Infinity) {
-    const c = caches.get(code), session = sessions.get(code); if (!c || !session) return null;
-    const marker = DerivedRateReset.cutoff(code, session.day);
-    if (force || c.dirty || !c.result || c.cutoff !== cutoff || c.rateMarker !== marker) {
-      const rateSession = DerivedRateReset.sessionFor(session, marker), ticks = [...c.ticks.values()];
-      c.result = BookThreeSecondCalculator.calculate(c.events, ticks, rateSession, cutoff);
-      c.result.integrity_audit = BookStatisticsAudit.calculate(c.events, ticks, rateSession, c.result);
-      c.result.rate_reset_at = marker;
-      if (marker) {
-        // Keep all historical visible-price details available; only rate accumulation is bounded.
-        const full = BookThreeSecondCalculator.calculate(c.events, ticks, session, cutoff);
-        c.result.visibility_changes = full.visibility_changes.map(row => Date.parse(row.source_span_start) < Date.parse(rateSession.started_at) ? { ...row, statistics_eligible: false } : row);
-        c.result.snapshots = full.snapshots;
-      }
-      c.dirty = false; c.computed = Date.now(); c.cutoff = cutoff; c.rateMarker = marker;
-    }
-    return c.result;
+  const serverStatsCache=new Map();let statsDesired=null,statsBusy=false,statsTimer=null;
+  const statsKey=(code,cutoff)=>code+'|'+(StableRecords.heads()[code]||0)+'|'+(Number.isFinite(cutoff)?cutoff:'latest');
+  async function loadServerStatistics(code,cutoff=Infinity){
+    const key=statsKey(code,cutoff);if(serverStatsCache.has(key))return serverStatsCache.get(key);
+    const params=new URLSearchParams({code});if(Number.isFinite(cutoff))params.set('cutoff',new Date(cutoff).toISOString());
+    const data=await StableRecords.api('statistics?'+params);
+    if(data.head!==(StableRecords.heads()[code]||0))throw Error('记录代际已变化，请刷新');
+    serverStatsCache.set(key,data.result||null);if(serverStatsCache.size>32)serverStatsCache.delete(serverStatsCache.keys().next().value);return data.result||null;
   }
-  function resetAllRates() {
-    const codes = DerivedRateReset.selection(watchlist.codes(), state.code);
-    if (!codes.length) { $('rateResetStatus').textContent = '暂无自选股或当前查询股票，未更改任何数据。'; return; }
-    const message = `重置今日比率累计：共 ${codes.length} 只股票\n${codes.join('、')}\n\n确认后，以你点击确认的时刻为新起点：今日买卖两侧累计加单量、撤单量及共同成交分母从0开始。等待两帧起点后的连续有效盘口，再按成交明细更新结算累计；跨起点区间不计入。分母为0时比率不可计算，并非0%。\n\n全部逐笔、五档快照、图表历史、搜索历史、自选列表和录制会话原样保留；不暂停、不重启采集。仅对当前浏览器生效。是否确认？`;
-    if (!window.confirm(message)) return;
-    try {
-      const saved = DerivedRateReset.reset(codes);
-      for (const code of codes) { const c = caches.get(code); if (c) c.dirty = true; }
-      $('rateResetStatus').textContent = `已设置今日比率新起点 ${tickSourceTime(saved.at)}（北京）：${saved.codes.join('、')}。加单量、撤单量与成交分母从0重新累计；分母为0时比率不可计算。原始记录与采集状态未更改。`;
-      renderStats();
-    } catch (e) { $('rateResetStatus').textContent = '比率起点更新失败：' + e.message; }
-  }
-  $('rateResetAll').addEventListener('click', resetAllRates);
-  window.addEventListener('storage', e => { if (e.key === DerivedRateReset.key) { for (const c of caches.values()) c.dirty = true; renderStats(); } });
+  function scheduleStatistics(code,cutoff){statsDesired={code,cutoff,key:statsKey(code,cutoff)};if(statsTimer)clearTimeout(statsTimer);statsTimer=setTimeout(async()=>{
+    if(statsBusy)return;const target=statsDesired;if(!target||serverStatsCache.has(target.key))return;statsBusy=true;
+    try{await loadServerStatistics(target.code,target.cutoff);if(statsDesired?.key===target.key)renderStats();}catch(e){$('bookFlowAt').textContent='服务器统计暂不可用：'+e.message;}finally{statsBusy=false;if(statsDesired?.key!==target.key)scheduleStatistics(statsDesired.code,statsDesired.cutoff);}
+  },250);}
+  function recompute(code,force=false,cutoff=Infinity){const key=statsKey(code,cutoff);if(serverStatsCache.has(key))return serverStatsCache.get(key);scheduleStatistics(code,cutoff);return null;}
   function renderStats() {
     const code = state.code, session = sessions.get(code), selected = viewTime;
     const normalized = selected ? normalizeChartTime(selected) : null;
@@ -1333,7 +1774,7 @@ const bookRecorder = (() => {
       renderThreeSecond(null,cutoff,null,true);
       renderAudit(null,cutoff);
     };
-    if (!session) { noData('查询后从启动时刻累计；不补造启动前的五档。'); return; }
+    if (!session) { noData('等待该股服务器采集会话；仅采自选，不补造未采集的五档。'); return; }
     const at = selected ? `所选 ${normalized}（北京）` : '最新累计';
     if (!Number.isFinite(cutoff) || cutoff < Date.parse(session.started_at) || (normalized && normalized.slice(0, 10) !== session.day)) {
       noData(`${at}：早于本次启动或不在本次交易日，无本次统计。启动于 ${tickSourceTime(session.started_at)}。`); return;
@@ -1345,6 +1786,7 @@ const bookRecorder = (() => {
     if (!snapshot) {
       noData(`${at}｜${startText}｜等待成交明细更新结算；每次盘口变化均持续独立记录。`);
       renderLedger(result,cutoff);
+      renderMomentDetails(result,cutoff,false);
       if (result?.rate_reset_at) {
         const zero = '累计加单 0 手；累计撤单 0 手；共同成交分母 0 手。等待新起点后的成交明细更新；分母为0，比率不可计算。';
         for (const id of ['bookFlowBidDetail','bookFlowAskDetail','bookBidAdditionDetail','bookAskAdditionDetail']) $(id).textContent = zero;
@@ -1361,22 +1803,24 @@ const bookRecorder = (() => {
     for (const [side, label] of [['bid', '买盘'], ['ask', '卖盘']]) {
       const metric = snapshot[side], suffix = side === 'bid' ? 'Bid' : 'Ask';
       $('bookFlow' + suffix).textContent = `${label}累计撤单率：${fmtTradeRate(metric.reduction_rate_pct,metric.denominator_trade_shares)}`;
-      $('bookFlow' + suffix + 'Detail').textContent = `撤单 ${fmtLots(metric.cancellation_shares)} 手；成交解释 ${fmtLots(metric.trade_credit_shares)} 手；观察减少 ${fmtLots(metric.observed_reduction_shares)} 手；加单 ${fmtLots(metric.added_shares)} 手；净加单 ${fmtLots(metric.net_change_shares)} 手；净加单率 ${fmtTradeRate(metric.net_addition_rate_pct,metric.denominator_trade_shares)}；共同成交分母 ${fmtLots(metric.denominator_trade_shares)} 手；每档先结算，再汇总五档。`;
+      $('bookFlow' + suffix + 'Detail').textContent = `撤单 ${fmtLots(metric.cancellation_shares)} 手；成交抵扣 ${fmtLots(metric.trade_credit_shares)} 手；合计减少 ${fmtLots(metric.observed_reduction_shares)} 手；加单 ${fmtLots(metric.added_shares)} 手；净加单 ${fmtLots(metric.net_change_shares)} 手；净加单率 ${fmtTradeRate(metric.net_addition_rate_pct,metric.denominator_trade_shares)}；共同成交分母 ${fmtLots(metric.denominator_trade_shares)} 手；每档先结算，再汇总五档。`;
     }
     const instant = snapshot.instant;
     $('bookFlowInstant').textContent = instant ? `最近成交更新区间 ${tickSourceTime(instant.start)} → ${tickSourceTime(instant.end)}｜买盘撤单率 ${fmtTradeRate(instant.bid?.reduction_rate_pct,instant.bid?.denominator_trade_shares)}，卖盘撤单率 ${fmtTradeRate(instant.ask?.reduction_rate_pct,instant.ask?.denominator_trade_shares)}` : '';
     $('bookFlowCoverage').textContent = `已结算 ${snapshot.confirmed_intervals} 次成交更新，排除 ${snapshot.excluded_intervals} 段不可比较快照；待下次更新结算 ${result.pending_intervals||0} 次盘口比较。进出五档仅记边界，不推算加撤。${selected?'仅使用选点前已收到的数据。':''}`;
-    $('bookStatsDetail').textContent = `${startText}；${collectors.has(code) && enabled ? '正在记录' : '已暂停 / 仅查看本地记录'}。会话快照 ${result.snapshots}，已核对 ${snapshot.confirmed_intervals} 区间。每档观察增加加上成交超出减少的部分为加单；减少超出成交的部分为撤单；各段持续累加，净加单＝累计加单－累计撤单，可为负。观察期全部成交（含五档外）作共同分母，每笔只计一次。`;
+    $('bookStatsDetail').textContent = `${startText}；${status(code)}。会话快照 ${result.snapshots}，已核对 ${snapshot.confirmed_intervals} 区间。每档观察增加加上成交超出减少的部分为加单；减少超出成交的部分为撤单；各段持续累加，净加单＝累计加单－累计撤单，可为负。观察期全部成交（含五档外）作共同分母，每笔只计一次。`;
   }
   async function refresh() {
     try {
-      const code = state.code; if (!code) { $('bookRecordStatus').textContent = '等待查询；记录保存在本浏览器。'; renderStats(); return; }
+      const code = state.code; if (!code) { $('bookRecordStatus').textContent = '等待查询；新记录仅保存到服务器。'; renderStats(); return; }
       const c = await cacheFor(code); if (state.code !== code) return;
-      if(historyCode!==code)renderSavedHistory(c);
-      $('bookRecordStatus').textContent = `${code}｜已保存 ${c.events.filter(e => e.kind === 'depth' || e.kind === 'tick_response').length} 次接口响应，${c.ticks.size} 条去重成交原始行｜${enabled && collectors.has(code) ? '随页面成功读取记录' : '记录已暂停'}${health.get(code)?.saveError ? '｜保存问题：' + health.get(code).saveError : '｜本浏览器持久保存（非云端）'}`;
+      await loadServerStatistics(code,viewTime?Date.parse(normalizeChartTime(viewTime).replace(' ','T')+'+08:00'):Infinity);
+      renderSavedHistory(c);
+      $('bookRecordStatus').textContent = `${code}｜已保存 ${c.events.filter(e => e.kind === 'depth' || e.kind === 'tick_response').length} 次接口响应，${c.ticks.size} 条去重成交原始行｜${status(code)}${health.get(code)?.saveError ? '｜保存问题：' + health.get(code).saveError : '｜服务器持久保存'}`;
       const history = c.events.filter(e => e.kind === 'depth').slice(-60).reverse().flatMap(e => (e.changes || []).map(change => ({ ...change, received_at: e.received_at, gap: e.gap_warning }))).slice(0, 30);
       const body = $('bookRecordRows'); body.replaceChildren();
       for (const r of history) { const tr = document.createElement('tr'); if(r.gap)tr.title='采样有缺口'; for (const v of [tickSourceTime(r.received_at), `${r.side === 'bid' ? '买' : '卖'} / ${r.price}`, r.before_shares === null ? '—' : r.before_shares / 100, r.after_shares === null ? '—' : r.after_shares / 100, r.delta_shares === null ? '—' : r.delta_shares / 100]) { const td = document.createElement('td'); td.textContent = String(v); tr.appendChild(td); } body.appendChild(tr); }
+      if (!history.length) { const tr=document.createElement('tr'),td=document.createElement('td');td.colSpan=5;td.textContent=`${status(code)}；服务器已保存 ${c.events.filter(e=>e.kind==='depth').length} 次盘口快照；当前没有可显示的原始 changes 行。`;tr.append(td);body.append(tr); }
       renderStats();
     } catch (e) { $('bookRecordStatus').textContent = '无法保存 / 计算记录：' + e.message + '。未宣称已保存。'; }
   }
@@ -1411,6 +1855,7 @@ const bookRecorder = (() => {
     c.events.push(event); c.dirty = true;
   }
   function capture(kind, payload, query = null) {
+    return; // Server worker owns every raw write; page reads never duplicate capture.
     if (isCodePaused(payload.code) || !collectors.get(payload.code)?.ready) return;
     const session = sessions.get(payload.code); if (!session) return;
     const copy = JSON.parse(JSON.stringify(payload)), at = stamp(), context = { session_id: session.id, segment_id: segments.get(payload.code) };
@@ -1419,40 +1864,14 @@ const bookRecorder = (() => {
   }
   function drop(code){const job=collectors.get(code);if(job){job.controller?.abort();collectors.delete(code);}}
   function pause() { activeCode='';syncWatchlist();renderStats(); }
-  function desiredCodes(){return [...new Set([...watchlist.codes(),...(activeCode?[activeCode]:[])])];}
-  function syncWatchlist(){
-    const desired=new Set(desiredCodes().filter(code=>!isCodePaused(code)));
-    for(const code of collectors.keys())if(!desired.has(code))drop(code);
-    for(const code of desired)if(!collectors.has(code))void start(code);
-    if(!scheduler)scheduler=setInterval(heartbeat,1000);
-  }
+  function desiredCodes(){return [...new Set(watchlist.codes())];}
+  function syncWatchlist(){if(!scheduler)scheduler=setInterval(heartbeat,10000);}
   async function start(code,startedAt=stamp(),reset=false){
-    if(isCodePaused(code)||!desiredCodes().includes(code))return;
-    if(collectors.has(code)&&!reset)return;
-    drop(code);const job={ready:false,busy:false,controller:null,next:0,initial:true};collectors.set(code,job);
-    const task=async()=>{
-      if(collectors.get(code)!==job)return;
-      const d=await db(),day=beijingDay(startedAt),recoveryKey='stats-original-session-recovered:'+code+':'+day;
-      const read=d.transaction(['latest','events']);
-      const [saved,recovery,recorded]=await Promise.all([request(read.objectStore('latest').get('stats-session:'+code)),request(read.objectStore('latest').get(recoveryKey)),request(read.objectStore('events').index('code').getAll(code))]);
-      const old=saved?.session;
-      let session=!reset&&old?.day===day?old:{id:`${code}|${startedAt}`,code,day,started_at:startedAt},recovered=false;
-      if(!reset&&!recovery){
-        const hasSavedDepth=new Set(recorded.filter(e=>e.kind==='depth'&&Number.isFinite(Date.parse(e.received_at))&&beijingDay(e.received_at)===day&&e.payload?.rows?.length===10&&e.payload.rows.every(r=>r&&Number.isFinite(Number(r.price))&&Number(r.price)>0&&Number.isSafeInteger(Number(r.volume))&&Number(r.volume)>=0)).map(e=>e.session_id));
-        const candidates=recorded.filter(e=>['stats_start','stats_resume'].includes(e.kind)).map(e=>e.session).concat(old||[]).filter(x=>x?.id&&x.code===code&&x.day===day&&Number.isFinite(Date.parse(x.started_at))&&beijingDay(x.started_at)===day&&hasSavedDepth.has(x.id)).sort((a,b)=>Date.parse(a.started_at)-Date.parse(b.started_at));
-        if(candidates.length){session={...candidates[0]};recovered=true;}
-      }
-      const segment=`${stamp()}|${Math.random().toString(36).slice(2,7)}`;
-      const tx=d.transaction(['latest','events'],'readwrite'),done=complete(tx);
-      tx.objectStore('latest').put({code:'stats-session:'+code,session});
-      if(reset||recovered)tx.objectStore('latest').put({code:recoveryKey,day,selected_session_id:session.id,recovered_at:stamp()});
-      tx.objectStore('events').add({kind:recovered||old?.id===session.id?'stats_resume':'stats_start',code,received_at:stamp(),session_id:session.id,segment_id:segment,session});
-      await done;if(collectors.get(code)!==job)return;
-      sessions.set(code,session);segments.set(code,segment);caches.delete(code);knownTicks.delete(code);job.ready=true;
-    };
-    queue=queue.then(task).catch(e=>{lastError=e.message;health.set(code,{...(health.get(code)||{}),saveError:e.message});if(collectors.get(code)===job)drop(code);});
-    await queue;watchlist.render();await refresh();
-    if(collectors.get(code)===job&&job.ready)void poll(code,true);
+    try{const d=await db(),tx=d.transaction('latest'),saved=await request(tx.objectStore('latest').get('stats-session:'+code));
+      if(saved?.session)sessions.set(code,saved.session);else sessions.delete(code);
+      collectors.set(code,{ready:false,serverOwned:true});
+      if(reset){caches.delete(code);knownTicks.delete(code);}
+    }catch(e){health.set(code,{saveError:e.message});throw e;}
   }
   async function begin(code,startedAt=stamp(),reset=false){
     activeCode=code;viewTime=null;stopped=false;
@@ -1469,7 +1888,7 @@ const bookRecorder = (() => {
     const timeout=setTimeout(()=>controller.abort(),18000),h=health.get(code)||{};health.set(code,{...h,loading:true});
     await Promise.all(['depth','ticks'].map(async kind=>{
       try{
-        const data=await thsdkRead(THSDK_TICK_API.replace('/api/ticks','/api/'+kind)+'?code='+code,controller.signal);
+        const data=await thsdkRead(THSDK_TICK_API.replace('/api/ticks','/api/'+kind)+'?code='+code,controller.signal,explicit);
         if(data.source!=='THSDK'||data.code!==code||!Array.isArray(data.rows))throw Error('盘口 / 成交响应字段不匹配');
         if(collectors.get(code)!==job||isCodePaused(code))return;
         health.set(code,{...(health.get(code)||{}),[kind+'Error']:''});
@@ -1478,36 +1897,35 @@ const bookRecorder = (() => {
     }));
     clearTimeout(timeout);inFlight--;if(collectors.get(code)===job){job.controller=null;job.busy=false;health.set(code,{...(health.get(code)||{}),loading:false});watchlist.render();}
   }
-  function heartbeat(){
-    const entries=[...collectors],offset=entries.length?roundRobin%entries.length:0,ordered=[...entries.slice(offset),...entries.slice(0,offset)];roundRobin+=4;
-    if(enabled&&!stopped)for(const [code,job]of ordered)if(job.ready&&job.initial)void poll(code,true);
-    if(enabled&&!stopped&&marketPhase().open){
-      for(const [code,job]of ordered){
-        if(!job.ready)continue;
-        if(sessions.get(code)?.day!==dayShanghai()){void start(code,stamp(),true);continue;}
-        // Current live view already polls both endpoints; history/hover and unselected stocks need their own page requests.
-        const liveView=code===state.code&&tickState.enabled&&!hoveredPointTime&&(!state.chartDate||state.chartDate===dayShanghai());
-        if(!liveView&&Date.now()>=job.next)void poll(code);
-      }
-    }
-    renderStats();watchlist.render();
+  let serverRefreshing=false;
+  async function reloadServerRecords(){
+    if(serverRefreshing)return;
+    serverRefreshing=true;
+    try{await StableRecords.refreshMetadata();await StableRecords.refreshHealth(watchlist.codes());
+      caches.clear();knownTicks.clear();sessions.clear();serverStatsCache.clear();
+      if(state.code){await start(state.code);await refresh();}watchlist.render();
+    }catch(e){$('bookRecordStatus').textContent='服务器记录读取暂不可用：'+e.message+'；不会使用旧浏览器记录代替。';}
+    finally{serverRefreshing=false;}
   }
-  document.addEventListener('visibilitychange',()=>{if(!document.hidden){for(const job of collectors.values())job.next=0;heartbeat();if(tickState.enabled&&marketPhase().open)tickSync(true);}});
-  function isCodePaused(code){return stopped||!enabled||pausedCodes.has(code);}
-  function setCodesPaused(codes,value){
-    const targets=desiredCodes(),selected=[...new Set(codes)].filter(code=>targets.includes(code));if(!selected.length)return;
-    if(!value&&(stopped||!enabled)){targets.forEach(code=>pausedCodes.add(code));stopped=false;enabled=true;$('bookRecordEnabled').checked=true;}
-    for(const code of selected){if(value)pausedCodes.add(code);else pausedCodes.delete(code);}
-    syncWatchlist();void refresh();watchlist.render();
+  function heartbeat(){if(!document.hidden&&marketPhase().open)void reloadServerRecords();}
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)heartbeat();});
+  function isCodePaused(){return false;}
+  function setCodesPaused(){} // No page action can pause the server worker.
+  function setPaused(){}
+  function status(code){
+    const phase=marketPhase();if(!phase.open)return phase.label+'，自动实时快照已暂停；仅查看服务器已存记录';
+    const h=StableRecords.collectorStatus(code),g=StableRecords.collectorStatus();
+    const d={active:'服务器采集中',closed_no_source_calls:'休市，等待下次开盘',calendar_unknown:'交易日历待确认，暂不取源',capacity_wait:'服务器低内存保护，等待采集',unsupported:'当前来源暂不支持该股盘口／逐笔',source_error:'来源暂不可用，后台退避重试'};
+    const at=h.heartbeat_at||g.heartbeat_at;
+    if(at&&Date.now()-Date.parse(at)>150000)return '采集心跳暂未更新，请检查后台';
+    return d[h.status]||d[g.status]||'服务器等待自选名单保存后排队采集';
   }
-  function setPaused(value){stopped=Boolean(value);if(!stopped){pausedCodes.clear();enabled=true;$('bookRecordEnabled').checked=true;}syncWatchlist();void refresh();watchlist.render();}
-  function status(code){const h=health.get(code)||{},errors=[h.saveError,h.depthError,h.ticksError].filter(Boolean),clock=at=>at?tickSourceTime(at):'尚无';return `${collectors.has(code)?'采集已启用':'采集已暂停'}｜五档已保存 ${clock(h.depth)}；逐笔已保存 ${clock(h.ticks)}${errors.length?'｜'+errors.join('；'):h.loading?'｜读取中…':''}`;}
   function viewAt(time = null) { viewTime = time; renderStats(); }
   function csvText(rows) { return '\uFEFF' + rows.map(row => row.map(v => '"' + String(v ?? '').replaceAll('"', '""') + '"').join(',')).join('\r\n'); }
   async function exportData(mode = 'json') {
     try {
       await queue; const code = state.code; if (!code) throw Error('请先查询股票');
-      const c = await cacheFor(code), result = recompute(code, true), time = stamp().replace(/[:.]/g, '-');
+      const c = await cacheFor(code);await loadServerStatistics(code);const result = recompute(code, true), time = stamp().replace(/[:.]/g, '-');
       if (mode === 'changes') {
         const rows = [['股票', '读取时间UTC', '读取时间北京', '前次读取UTC', '间隔毫秒', '采样缺口', '方向', '价格', '实际快照起始挂单股', '实际快照结束挂单股', '净变化股', '说明']];
         for (const e of c.events.filter(e => e.kind === 'depth')) for (const r of e.changes || []) rows.push([code, e.received_at, tickSourceTime(e.received_at), e.previous_received_at, e.interval_ms, e.gap_warning, r.side, r.price, r.before_shares, r.after_shares, r.delta_shares, r.note]);
@@ -1521,7 +1939,7 @@ const bookRecorder = (() => {
         for(const w of result?.windows||[])rows.push([code,w.start,w.end,w.confirmed_at,w.source_trade_volume_shares,w.bid.added_shares,w.bid.cancellation_shares,w.bid.net_change_shares,w.bid.addition_rate_pct,w.bid.reduction_rate_pct,w.ask.added_shares,w.ask.cancellation_shares,w.ask.net_change_shares,w.ask.addition_rate_pct,w.ask.reduction_rate_pct,w.source_span_start,w.source_span_end,w.sampling_crosses_boundary,w.sample_pairs,'更新区间唯一价格侧',w.visibility_counts?.in_five_same_price,w.visibility_counts?.entered_five,w.visibility_counts?.left_five,result?.rate_reset_at||'',w.bid.net_addition_rate_pct,w.ask.net_addition_rate_pct,JSON.stringify(w.levels||[])]);
         download(`${code}_成交更新逐档统计_${time}.csv`,csvText(rows),'text/csv;charset=utf-8');
       } else if (mode === 'stats') {
-        const rows=[['股票','会话启动UTC','数据截至UTC（按窗口顺序累计）','已核对盘口时间UTC','盘口侧','累计加单股','观察减少股','净加单股','共同累计成交分母股','增加成交比百分比','减少成交比百分比','成交更新结算次数','排除区间','撤单率','成交方向归因','今日比率重置起点UTC（空为未重置）','净加单率百分比','撤单股']];
+        const rows=[['股票','会话启动UTC','数据截至UTC（按窗口顺序累计）','已核对盘口时间UTC','盘口侧','累计加单股','合计减少股','净加单股','共同累计成交分母股','增加成交比百分比','减少成交比百分比','成交更新结算次数','排除区间','撤单率','成交方向归因','今日比率重置起点UTC（空为未重置）','净加单率百分比','撤单股']];
         for(const point of result?.timeline||[])for(const side of ['bid','ask']){const m=point[side];rows.push([code,sessions.get(code)?.started_at,point.at,point.through,side,m.added_shares,m.observed_reduction_shares,m.net_change_shares,m.denominator_trade_shares,m.addition_rate_pct,m.reduction_rate_pct,point.confirmed_intervals,point.excluded_intervals,m.reduction_rate_pct,'成交更新逐档结算',result?.rate_reset_at||'',m.net_addition_rate_pct,m.cancellation_shares]);}
         download(`${code}_方向中立累计统计_${time}.csv`,csvText(rows),'text/csv;charset=utf-8');
       } else {
@@ -1529,20 +1947,24 @@ const bookRecorder = (() => {
       }
     } catch (e) { $('bookRecordStatus').textContent = '导出失败：' + e.message; }
   }
-  $('bookRecordEnabled').addEventListener('change', () => { enabled = $('bookRecordEnabled').checked;syncWatchlist();void refresh();watchlist.render(); });
   $('bookRecordRestart').addEventListener('click', () => { if (state.code) void begin(state.code, stamp(), true); });
   $('bookRecordJSON').addEventListener('click', () => void exportData());
   $('bookRecordCSV').addEventListener('click', () => void exportData('changes'));
   $('bookStatsCSV').addEventListener('click', () => void exportData('stats'));
-  return { capture, refresh, compare, begin, pause, heartbeat, viewAt, exportData, syncWatchlist, setPaused, setCodesPaused, isCodePaused, collectionCodes:desiredCodes, isPaused:()=>stopped||!enabled, status };
+  return { capture, refresh, compare, begin, pause, heartbeat, viewAt, exportData, syncWatchlist, setPaused, setCodesPaused, isCodePaused, collectionCodes:desiredCodes, isPaused:()=>false, status, reloadServerRecords };
 })();
 
-watchlist.init();
+for(const id of ['bookRecordRestart','bookRecordJSON','bookRecordCSV','bookStatsCSV'])$('favoriteRecordActions').append($(id));
+$('favoriteHistoryHost').append($('bookSavedHistory'));
+watchlist.init();void StableRecords.ready.then(()=>bookRecorder.reloadServerRecords());
+try{const x=JSON.parse(localStorage.getItem('stock-ui-settings-v1')||'{}');if(Number(x.interval)>=1&&Number(x.interval)<=600)$('interval').value=x.interval;if(typeof x.noNews==='boolean')$('noNews').checked=x.noNews;}catch{}
+for(const id of ['interval','noNews'])$(id).addEventListener('change',()=>localStorage.setItem('stock-ui-settings-v1',JSON.stringify({interval:Math.max(1,Math.min(600,Number($('interval').value)||1)),noNews:$('noNews').checked})));
+
 depthRender();$('depthReadOnce').disabled=true;$('depthReadOnce').addEventListener('click',()=>depthSync(true,true));
 $('tickLatestBtn').addEventListener('click',()=>{if(state.chartDate!==dayShanghai()){ $('chartDate').value=dayShanghai();void loadSelectedChartDay().then(()=>{clearChartSelection();tickSync(true,true);});}else{clearChartSelection();tickSync(true,true);}});
 
-renderStockHistory();$('historySelect').addEventListener('change',event=>{if(event.target.value){$('query').value=event.target.value;setStatus('已填入历史股票代码；点击“查询 / 开始”即可查询。');}});$('clearHistoryBtn').addEventListener('click',()=>{try{localStorage.removeItem(STOCK_HISTORY_KEY);}catch{}renderStockHistory();setStatus('已清除本浏览器保存的股票输入历史。');});
-$('queryForm').addEventListener('submit',runQuery);$('chartDate').addEventListener('change',loadSelectedChartDay);$('stopBtn').addEventListener('click',()=>{stopTimer();tickStop();bookRecorder.setPaused(true);setStatus('已停止自动刷新与全部自选采集；可在“暂停／继续采集”中选择恢复，或点击“查询 / 开始”恢复全局停止（单股暂停设置保留）。');});$('csvBtn').addEventListener('click',downloadCSV);$('mdBtn').addEventListener('click',()=>download(`${state.code}_量价报告.md`,makeReport(),'text/markdown;charset=utf-8'));
+renderStockHistory();$('historySelect').addEventListener('change',event=>{if(event.target.value){$('query').value=event.target.value;setStatus('已填入历史股票代码；点击“查询 / 开始”即可查询。');}});$('clearHistoryBtn').addEventListener('click',()=>{try{localStorage.removeItem(STOCK_HISTORY_KEY);}catch{}renderStockHistory();setStatus('已提交清除服务器查询历史；旧浏览器历史未改动。');});
+$('queryForm').addEventListener('submit',runQuery);$('chartDate').addEventListener('change',loadSelectedChartDay);$('stopBtn').addEventListener('click',()=>{stopTimer();tickStop();setStatus('已停止本页行情刷新；服务器自选采集继续运行，不受网页开关影响。');});$('csvBtn').addEventListener('click',downloadCSV);$('mdBtn').addEventListener('click',()=>download(`${state.code}_量价报告.md`,makeReport(),'text/markdown;charset=utf-8'));
 $('noNews').addEventListener('change',()=>{if(state.code&&$('noNews').checked){state.news=[];state.anns=[];renderNews();}});
 let chartGesture=null,suppressChartHover=false,chartHoverResume=null;
 const CHART_DRAG_THRESHOLD=8; // CSS pixels: tolerate tiny finger jitter, not a real swipe.
@@ -1592,6 +2014,43 @@ window.addEventListener('blur',()=>{if(chartGesture)finishChartGesture();else if
 // Tap toggling happens only on pointerup, never on the synthetic click after a swipe.
 </script>
 
-	<script src="./ui-parity.js?v=20261026-structure5"></script>
-</body>
-</html>
+	<script>
+(()=>{
+  const input=document.getElementById('interval'),note=document.getElementById('samplingSyncStatus');
+  if(!input||!note)return;
+  const endpoint='/api/collection/sampling-interval';
+  const normalize=value=>{const n=Number(value);return Number.isFinite(n)?Math.max(1,Math.min(600,Math.round(n))):1;};
+  let ready=false,touched=false,saves=Promise.resolve();
+  const save=()=>{
+    const seconds=normalize(input.value);input.value=String(seconds);
+    saves=saves.then(async()=>{
+      note.textContent='正在保存后台采样间隔…';
+      try{
+        const response=await fetch(endpoint,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({seconds})});
+        if(!response.ok)throw new Error('HTTP '+response.status);
+        note.textContent='本页与服务器自选采集均按 '+seconds+' 秒采样。';
+      }catch{
+        note.textContent='后台设置保存失败；服务器采集仍使用上次保存的间隔。';
+      }
+    });
+  };
+  input.addEventListener('change',()=>{if(!ready){touched=true;return;}save();});
+  (async()=>{
+    try{
+      const response=await fetch(endpoint,{credentials:'same-origin',headers:{'Accept':'application/json'}});
+      if(!response.ok)throw new Error('HTTP '+response.status);
+      const data=await response.json(),seconds=normalize(data.seconds);
+      if(!touched)input.value=String(seconds);
+      note.textContent='与服务器自选采集同步：每 '+seconds+' 秒；修改后自动保存。';
+    }catch{
+      note.textContent='后台采样间隔暂不可读；本页仍可按当前值采样。';
+    }finally{
+      ready=true;
+      if(touched)save();
+    }
+  })();
+})();
+</script>
+
+
+</body></html>
