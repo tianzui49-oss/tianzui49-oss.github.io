@@ -1375,8 +1375,17 @@ const bookRecorder = (() => {
       if(historyCode!==code)renderSavedHistory(c);
       $('bookRecordStatus').textContent = `${code}｜已保存 ${c.events.filter(e => e.kind === 'depth' || e.kind === 'tick_response').length} 次接口响应，${c.ticks.size} 条去重成交原始行｜${enabled && collectors.has(code) ? '随页面成功读取记录' : '记录已暂停'}${health.get(code)?.saveError ? '｜保存问题：' + health.get(code).saveError : '｜本浏览器持久保存（非云端）'}`;
       const history = c.events.filter(e => e.kind === 'depth').slice(-60).reverse().flatMap(e => (e.changes || []).map(change => ({ ...change, received_at: e.received_at, gap: e.gap_warning }))).slice(0, 30);
-      const body = $('bookRecordRows'); body.replaceChildren();
-      for (const r of history) { const tr = document.createElement('tr'); if(r.gap)tr.title='采样有缺口'; for (const v of [tickSourceTime(r.received_at), `${r.side === 'bid' ? '买' : '卖'} / ${r.price}`, r.before_shares === null ? '—' : r.before_shares / 100, r.after_shares === null ? '—' : r.after_shares / 100, r.delta_shares === null ? '—' : r.delta_shares / 100]) { const td = document.createElement('td'); td.textContent = String(v); tr.appendChild(td); } body.appendChild(tr); }
+      const body = $('bookRecordRows'), rows = body._stableRows || (body._stableRows = new Map()), keep = new Set();
+      const valuesFor = r => [tickSourceTime(r.received_at), `${r.side === 'bid' ? '买' : '卖'} / ${r.price}`, r.before_shares === null ? '—' : r.before_shares / 100, r.after_shares === null ? '—' : r.after_shares / 100, r.delta_shares === null ? '—' : r.delta_shares / 100].map(String);
+      for (const r of history) {
+        const key = `${r.received_at}|${r.side}|${r.price}`; keep.add(key);
+        let tr = rows.get(key);
+        if (!tr) { tr = document.createElement('tr'); for (let i = 0; i < 5; i++) tr.appendChild(document.createElement('td')); rows.set(key, tr); }
+        tr.title = r.gap ? '采样有缺口' : '';
+        valuesFor(r).forEach((value, index) => { if (tr.cells[index].textContent !== value) tr.cells[index].textContent = value; });
+      }
+      for (const [key, tr] of rows) if (!keep.has(key)) { tr.remove(); rows.delete(key); }
+      history.forEach((r, index) => { const tr = rows.get(`${r.received_at}|${r.side}|${r.price}`); if (body.children[index] !== tr) body.insertBefore(tr, body.children[index] || null); });
       renderStats();
     } catch (e) { $('bookRecordStatus').textContent = '无法保存 / 计算记录：' + e.message + '。未宣称已保存。'; }
   }
