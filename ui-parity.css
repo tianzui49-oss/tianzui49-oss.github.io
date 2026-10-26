@@ -87,6 +87,7 @@ table thead th{position:-webkit-sticky;position:sticky;top:0;z-index:2;backgroun
 .book-methods>summary{cursor:pointer;font-weight:600;color:var(--ink)}
 .book-methods p,.book-methods .small{overflow-wrap:anywhere}
 .book-data-bridge{display:none!important}
+#bookTradeDetailGrid{display:none!important}
 #bookLedger,#bookAuditPanel{min-width:0;max-width:100%}
 #bookLedger .table-wrap{max-width:100%}
 #bookAuditPanel>summary{font-size:13px!important}
