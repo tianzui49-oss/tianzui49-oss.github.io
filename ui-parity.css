@@ -46,21 +46,20 @@ table thead th{position:-webkit-sticky;position:sticky;top:0;z-index:2;backgroun
 #bookRecordsPanel .table-wrap{max-width:100%}
 #bookTradeDetailGrid{align-items:start;grid-template-columns:minmax(0,1fr)}
 #bookTradeDetailGrid .book-side-card{overflow:hidden}
-#bookTradeDetailGrid table{min-width:980px}
+#bookTradeDetailGrid table{min-width:1080px}
 #bookTradeDetailGrid .table-wrap{max-height:460px}
 #bookTradeDetailGrid td{font-variant-numeric:tabular-nums}
 #bookTradeDetailGrid th:first-child,#bookTradeDetailGrid td:first-child{white-space:normal;min-width:150px}
 #bookTradeDetailGrid .table-wrap:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
-.book-original-table{margin:16px 0 0;padding-top:12px;border-top:1px solid var(--line)}
-.book-original-table>summary,.book-methods>summary,.book-advanced>summary{cursor:pointer;font-weight:600;color:var(--ink)}
-.book-original-table>summary{font-size:13px;color:var(--muted)}
-.book-original-table>.table-wrap{margin-top:12px}
-.book-source-fields{margin-top:12px}
-.book-source-fields h4{margin:0 0 5px;font-size:13px}
+#bookTradeDetailGrid .book-level-cell{text-align:left;min-width:110px;white-space:normal}
+.book-level-detail>summary,.book-methods>summary,.book-advanced>summary{cursor:pointer;font-weight:600;color:var(--ink)}
+.book-level-detail>summary{font-size:12px;color:var(--muted)}
+.book-level-detail pre{max-width:420px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px}
+.book-data-bridge{display:none!important}
 .book-methods p,.book-methods .small{overflow-wrap:anywhere}
 #bookLedger,#bookAuditPanel{min-width:0;max-width:100%}
-#bookAuditPanel>summary{font-size:15px!important}
-.hosted-loaded-summary{display:block;margin:4px 0 10px;font-size:12px;color:var(--muted)}
+#bookLedger .table-wrap{max-width:100%}
+#bookAuditPanel>summary{font-size:13px!important}
 @media(max-width:640px){
  .book-side-grid{grid-template-columns:minmax(0,1fr);gap:12px}
  .book-side-card{padding:14px}
