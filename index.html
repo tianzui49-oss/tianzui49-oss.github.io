@@ -27,13 +27,13 @@ main{max-width:1180px;margin:0 auto;padding:28px 20px 60px}.hero{display:flex;ju
 <body>
 <main>
   <header class="hero">
-    <div><h1>股票量价表与实时分时图</h1><p>浏览器记录版｜趋势行情来自腾讯，普通逐笔来自 THSDK，新闻与公告来自东方财富</p></div>
+    <div><h1>股票量价表与实时分时图</h1><p>服务器记录版｜趋势行情来自腾讯，普通逐笔来自 THSDK，新闻与公告来自东方财富</p></div>
     <span class="small">网页查询｜THSDK 逐笔由私有后端提供</span>
   </header>
 
   <section class="card">
     <form id="queryForm" class="form">
-      <div class="field query-field"><label for="query">股票代码或名称</label><input id="query" autocomplete="off" placeholder="例如 600000 或 浦发银行" required><div class="history-tools"><select id="historySelect" aria-label="最近输入的股票"><option value="">暂无股票历史记录</option></select><button class="secondary" id="clearHistoryBtn" type="button" disabled>清除历史</button></div></div>
+      <div class="field query-field"><label for="query">股票代码或名称</label><input id="query" autocomplete="off" placeholder="例如 600000 或 浦发银行" required><div class="history-tools"><select id="historySelect" aria-label="最近输入的股票"><option value="">选择最近输入的股票…</option></select><button class="secondary" id="clearHistoryBtn" type="button" disabled>清除历史</button></div></div>
       <div class="field"><label for="start">开始日期（可选）</label><input id="start" type="date"></div>
       <div class="field"><label for="end">结束日期（可选）</label><input id="end" type="date"></div>
       <div class="field sampling-field"><label for="interval">实时采样（秒）</label><input id="interval" type="number" min="1" max="600" value="1"><span class="field-hint">本页轮询间隔，默认每 1 秒。</span></div>
@@ -43,7 +43,7 @@ main{max-width:1180px;margin:0 auto;padding:28px 20px 60px}.hero{display:flex;ju
       <label><input id="noNews" type="checkbox"> 不抓取新闻与公告</label>
       <div><button class="secondary" id="csvBtn" type="button" disabled>下载 CSV</button> <button class="secondary" id="mdBtn" type="button" disabled>下载报告</button></div>
     </div>
-    <div id="status">输入股票名称或代码查询。</div>
+    <div id="status">输入股票名称或代码查询。自选由服务器自动记录。</div>
   </section>
 
   <section class="card watchlist-panel" id="watchlistPanel" aria-labelledby="watchlistTitle">
@@ -307,7 +307,7 @@ let state={code:'',symbol:'',name:'',rows:[],dailyByDate:{},chart:[],intradayByD
 let refreshInFlight=false,hoveredPointTime=null,pinnedPointTime=null;
 const $=id=>document.getElementById(id);
 function readStockHistory(){try{const items=JSON.parse(localStorage.getItem(STOCK_HISTORY_KEY)||'[]');return Array.isArray(items)?items.filter(x=>x&&typeof x.code==='string').slice(0,20):[];}catch{return [];}}
-function renderStockHistory(){const select=$('historySelect'),items=readStockHistory();select.replaceChildren();const first=document.createElement('option');first.value='';first.textContent=items.length?'选择最近输入的股票…':'暂无股票历史记录';select.appendChild(first);for(const item of items){const option=document.createElement('option');option.value=item.code;option.textContent=`${item.code}｜${item.name||item.query||item.code}${item.query&&item.query!==item.code&&item.query!==item.name?`（输入：${item.query}）`:''}`;select.appendChild(option);}$('clearHistoryBtn').disabled=!items.length;}
+function renderStockHistory(){const select=$('historySelect'),items=readStockHistory();select.replaceChildren();const first=document.createElement('option');first.value='';first.textContent='选择最近输入的股票…';select.appendChild(first);for(const item of items){const option=document.createElement('option');option.value=item.code;option.textContent=`${item.code}｜${item.name||item.query||item.code}${item.query&&item.query!==item.code&&item.query!==item.name?`（输入：${item.query}）`:''}`;select.appendChild(option);}$('clearHistoryBtn').disabled=!items.length;}
 function saveStockHistory(query,code,name){try{const item={query:String(query||'').trim(),code:String(code),name:String(name||code)};const items=[item,...readStockHistory().filter(x=>x.code!==item.code)].slice(0,20);localStorage.setItem(STOCK_HISTORY_KEY,JSON.stringify(items));renderStockHistory();}catch{}}
 function setStatus(text,type=''){const e=$('status');e.textContent=text;e.className=type;}
 function dayShanghai(){return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());}
