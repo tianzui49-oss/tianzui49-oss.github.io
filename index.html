@@ -871,7 +871,7 @@ function depthSync(force=false,manual=false){
     depthState.records.set(code,record);try{localStorage.setItem(DEPTH_STORAGE_PREFIX+code,JSON.stringify(record));}catch{}depthShow();
   }).catch(error=>{if(generation===depthState.generation&&code===state.code)note=`读取失败：${error.message}。保留最后有效数据；后续刷新将重试。`;}).finally(()=>{clearTimeout(timeout);if(depthState.controller===controller){depthState.controller=null;depthState.manual=false;}if(generation===depthState.generation&&code===state.code)depthShow(note);});
 }
-/* Live, revisable three-second buckets, not a settlement timer; trade direction stays neutral. */
+/* Trade-update cumulative settlement; classify by the latest valid top-five quote at trade time, not aggressor direction. */
 const BookThreeSecondCalculator = (() => {
   const N = v => typeof v === 'number' ? v : Number(v);
   const ms = v => { if (typeof v === 'number') return v < 2e11 ? v * 1000 : v; const x = Date.parse(v); return Number.isFinite(x) ? x : NaN; };
@@ -881,6 +881,7 @@ const BookThreeSecondCalculator = (() => {
   const minute = t => +bj(t).slice(11, 13) * 60 + +bj(t).slice(14, 16) + +bj(t).slice(17, 19) / 60;
   const phase = t => { const m = minute(t); return m >= 570 && m <= 690 ? 'am' : m >= 780 && m < 897 ? 'pm' : null; };
   const local = v => { if (typeof v === 'number') return ms(v); let z = String(v ?? '').trim().replace(' ', 'T'); if (/^\d{4}-\d\d-\d\dT\d\d:\d\d$/.test(z)) z += ':00'; if (!/[zZ]|[+-]\d\d:?\d\d$/.test(z)) z += '+08:00'; const x = Date.parse(z); return Number.isFinite(x) ? x : NaN; };
+  const gapLimit = e => { const n = N(e?.gap_limit_ms || 5000); return Math.max(5000, Number.isFinite(n) ? n : 5000); };
 
   function parse(e) {
     const rows = Array.isArray(e?.payload?.rows) ? e.payload.rows : [], a = { bid: [], ask: [] };
@@ -896,178 +897,288 @@ const BookThreeSecondCalculator = (() => {
     return { a, valid };
   }
 
-  const empty = () => ({ added_shares: 0, visible_added_shares: 0, observed_reduction_shares: 0, reduction_shares: 0, cancellation_shares: 0, net_change_shares: 0, denominator_trade_shares: 0, addition_rate_pct: null, reduction_rate_pct: null, rate_pct: null, trade_credit_shares: 0, unexplained_shares: 0, unknown_shares: 0, baseline_shares: 0 });
-  const finish = m => { const d = m.denominator_trade_shares; m.addition_rate_pct = d > 0 ? m.added_shares / d * 100 : null; m.reduction_rate_pct = d > 0 && m.cancellation_shares !== null ? m.cancellation_shares / d * 100 : null; m.rate_pct = m.reduction_rate_pct; m.unexplained_shares = m.cancellation_shares; m.unknown_shares = m.cancellation_shares; m.reduction_shares = m.cancellation_shares; m.net_change_shares = m.added_shares - m.cancellation_shares; m.net_addition_rate_pct = d > 0 ? m.net_change_shares / d * 100 : null; return m; };
+  const empty = () => ({ added_shares: 0, visible_added_shares: 0, replenishment_shares: 0, executed_shares: 0, observed_reduction_shares: 0, reduction_shares: 0, cancellation_shares: 0, net_change_shares: 0, denominator_trade_shares: 0, addition_rate_pct: null, reduction_rate_pct: null, rate_pct: null, trade_credit_shares: 0, unexplained_shares: 0, unknown_shares: 0, baseline_shares: 0 });
+  const finish = m => { const d = m.denominator_trade_shares; m.addition_rate_pct = d > 0 ? m.added_shares / d * 100 : null; m.reduction_rate_pct = d > 0 ? m.cancellation_shares / d * 100 : null; m.rate_pct = m.reduction_rate_pct; m.unexplained_shares = m.cancellation_shares; m.unknown_shares = m.cancellation_shares; m.reduction_shares = m.cancellation_shares; m.net_change_shares = m.added_shares - m.cancellation_shares; m.net_addition_rate_pct = d > 0 ? m.net_change_shares / d * 100 : null; return m; };
   function coverage(r, t0, t1, d) { const b = r.payload_metadata?.bounds || {}, rt = ms(r.received_at); if (!Number.isFinite(rt) || rt < t1) return false; if (b.mode === 'available-day') return b.day === d; if (b.mode === 'minute') { const lo = local(b.start), hi = local(b.end); return Number.isFinite(lo) && Number.isFinite(hi) && lo <= t0 && hi >= t1; } return false; }
 
   function calculate(inputEvents, inputTicks, session, cutoff = Infinity) {
     const s = session || {}, sid = s.id, code = s.code, targetDay = s.day, sessionStart = ms(s.started_at);
-    const events = (Array.isArray(inputEvents) ? inputEvents : []).filter(e => e && e.session_id === sid).map((e,i)=>({...e,__i:i,__t:ms(e.received_at)})).filter(e=>Number.isFinite(e.__t)&&e.__t<=cutoff&&(!Number.isFinite(sessionStart)||e.__t>=sessionStart)&&(!code||!e.code||e.code===code)&&(!targetDay||day(e.__t)===targetDay)).sort((a,b)=>a.__t-b.__t||a.__i-b.__i);
-    const depths=events.filter(e=>e.kind==='depth'), errors=events.filter(e=>e.kind==='feed_error'), pairs=[], excluded=[], visibilityChanges=[];
-    let prev=null,lastDepth=null; const baseline={bid:0,ask:0}; let hasBaseline=false;
-    for(const e of depths){
-      lastDepth=e.__t;const q=parse(e),ph=phase(e.__t);
-      if(!q.valid||!ph){excluded.push({start:iso(e.__t),end:iso(e.__t),reason:!q.valid?'incomplete_snapshot':'outside_session'});prev=null;continue;}
-      if(!hasBaseline){for(const side of ['bid','ask'])baseline[side]=q.a[side].reduce((n,x)=>n+x.shares,0);hasBaseline=true;}
-      if(prev){const gap=e.__t-prev.e.__t,limit=Math.max(5000,N(e.gap_limit_ms||5000));
-        if(e.segment_id===prev.e.segment_id&&ph===prev.ph&&gap>0&&gap<=limit&&!e.gap_warning&&!errors.some(x=>x.feed==='depth'&&x.__t>prev.e.__t&&x.__t<=e.__t)){
-          const p={t0:prev.e.__t,t1:e.__t,segment_id:e.segment_id,old:prev.q,new:q,details:[]};
-          for(const side of ['bid','ask']){const before=new Map(prev.q.a[side].map(x=>[x.price,x])),after=new Map(q.a[side].map(x=>[x.price,x]));
-            for(const price of new Set([...before.keys(),...after.keys()])){const b=before.get(price),a=after.get(price),delta=b&&a?a.shares-b.shares:null;
-              if(b&&a&&delta===0)continue;
-              const state=b&&a?'in_five_same_price':a?'entered_five':'left_five';
-              const d={id:`${sid}:${p.t0}:${p.t1}:${side}:${price}`,side,price,before_shares:b?b.shares:null,after_shares:a?a.shares:null,delta_shares:delta,before_level:b?b.level:null,after_level:a?a.level:null,visibility_state:state,visibility_label:state==='in_five_same_price'?'同价位仍在五档内':a?'进入五档':'移出五档（外部余量未知）',interval_start:iso(p.t0),interval_end:iso(p.t1),source_span_start:iso(p.t0),source_span_end:iso(p.t1),confirmed_at:iso(p.t1),statistics_eligible:false,observations:[{received_at:iso(p.t1),before_shares:b?b.shares:null,after_shares:a?a.shares:null,delta_shares:delta}]};
-              p.details.push(d);visibilityChanges.push(d);
+    const events = (Array.isArray(inputEvents) ? inputEvents : []).filter(e => e && e.session_id === sid).map((e, i) => ({ ...e, __i: i, __t: ms(e.received_at) })).filter(e => Number.isFinite(e.__t) && e.__t <= cutoff && (!Number.isFinite(sessionStart) || e.__t >= sessionStart) && (!code || !e.code || e.code === code) && (!targetDay || day(e.__t) === targetDay)).sort((a, b) => a.__t - b.__t || a.__i - b.__i);
+    const depths = events.filter(e => e.kind === 'depth'), errors = events.filter(e => e.kind === 'feed_error'), pairs = [], excluded = [], visibilityChanges = [], sideSwitches = [], bookTimeline = [];
+    let prev = null, lastDepth = null;
+    const baseline = { bid: 0, ask: 0 }; let hasBaseline = false;
+    for (const e of depths) {
+      lastDepth = e.__t;
+      const q = parse(e), ph = phase(e.__t), valid = q.valid && Boolean(ph);
+      const state = { e, at: e.__t, q, ph, valid }; bookTimeline.push(state);
+      if (!valid) { excluded.push({ start: iso(e.__t), end: iso(e.__t), reason: !q.valid ? 'incomplete_snapshot' : 'outside_session' }); prev = null; continue; }
+      if (!hasBaseline) { for (const side of ['bid', 'ask']) baseline[side] = q.a[side].reduce((n, x) => n + x.shares, 0); hasBaseline = true; }
+      if (prev) {
+        const gap = e.__t - prev.e.__t, limit = gapLimit(e);
+        if (e.segment_id === prev.e.segment_id && ph === prev.ph && gap > 0 && gap <= limit && !e.gap_warning && !errors.some(x => x.feed === 'depth' && x.__t > prev.e.__t && x.__t <= e.__t)) {
+          const p = { t0: prev.e.__t, t1: e.__t, segment_id: e.segment_id, old: prev.q, new: q, details: [], side_switches: [] };
+          const oldByPrice = new Map(), newByPrice = new Map();
+          for (const side of ['bid', 'ask']) {
+            for (const x of prev.q.a[side]) oldByPrice.set(x.price, { side, row: x });
+            for (const x of q.a[side]) newByPrice.set(x.price, { side, row: x });
+          }
+          const switched = new Map();
+          for (const price of new Set([...oldByPrice.keys(), ...newByPrice.keys()])) {
+            const before = oldByPrice.get(price), after = newByPrice.get(price);
+            if (!before || !after || before.side === after.side) continue;
+            const sw = { id: `${sid}:${p.t0}:${p.t1}:switch:${price}`, price, from_side: before.side, to_side: after.side, before_shares: before.row.shares, after_shares: after.row.shares, interval_start: iso(p.t0), interval_end: iso(p.t1), visibility_state: 'side_changed', visibility_label: `同一价位由${before.side === 'bid' ? '买盘' : '卖盘'}转到${after.side === 'bid' ? '买盘' : '卖盘'}；两侧边界挂量未知，不推断加单或撤单`, statistics_eligible: false };
+            switched.set(price, sw); p.side_switches.push(sw); sideSwitches.push(sw);
+          }
+          for (const side of ['bid', 'ask']) {
+            const before = new Map(prev.q.a[side].map(x => [x.price, x])), after = new Map(q.a[side].map(x => [x.price, x]));
+            for (const price of new Set([...before.keys(), ...after.keys()])) {
+              const b = before.get(price), a = after.get(price), delta = b && a ? a.shares - b.shares : null;
+              if (b && a && delta === 0) continue;
+              const stateName = b && a ? 'in_five_same_price' : a ? 'entered_five' : 'left_five', sw = switched.get(price);
+              const description = sw ? `${sw.visibility_label}；本侧进出边界变化未知` : stateName === 'in_five_same_price' ? '同价位仍在五档内' : a ? '进入五档（之前挂量未知）' : '移出五档（外部余量未知）';
+              const d = { id: `${sid}:${p.t0}:${p.t1}:${side}:${price}`, side, price, before_shares: b ? b.shares : null, after_shares: a ? a.shares : null, delta_shares: delta, before_level: b ? b.level : null, after_level: a ? a.level : null, visibility_state: stateName, visibility_label: description, side_switch_id: sw?.id || null, switched_to: sw?.to_side || null, switched_from: sw?.from_side || null, interval_start: iso(p.t0), interval_end: iso(p.t1), source_span_start: iso(p.t0), source_span_end: iso(p.t1), confirmed_at: iso(p.t1), statistics_eligible: false, observations: [{ received_at: iso(p.t1), before_shares: b ? b.shares : null, after_shares: a ? a.shares : null, delta_shares: delta }] };
+              p.details.push(d); visibilityChanges.push(d);
             }
-          }pairs.push(p);
-        }else excluded.push({start:iso(prev.e.__t),end:iso(e.__t),reason:'sampling_or_segment_gap'});
-      }prev={e,q,ph};
+          }
+          pairs.push(p);
+        } else excluded.push({ start: iso(prev.e.__t), end: iso(e.__t), reason: 'sampling_or_segment_gap' });
+      }
+      prev = { e, q, ph };
     }
-    const valid=t=>t&&t.row&&t.row.price!==null&&t.row.price!==''&&Number.isFinite(N(t.row.price))&&N(t.row.price)>0&&t.row.volume!==null&&t.row.volume!==''&&Number.isSafeInteger(N(t.row.volume))&&N(t.row.volume)>=0;
-    const seen=new Set(),ts=[];
-    for(const [i,t] of (Array.isArray(inputTicks)?inputTicks:[]).entries()){
-      if(!valid(t)||code&&t.code!==code)continue;const recv=ms(t.first_received_at),trade=ms(t.row.time),id=t.id??JSON.stringify([t.code,t.row,i]);
-      if(seen.has(id)||!Number.isFinite(recv)||recv>cutoff||!Number.isFinite(trade)||trade>cutoff||Number.isFinite(sessionStart)&&trade<sessionStart||targetDay&&day(trade)!==targetDay||Number.isFinite(sessionStart)&&recv<sessionStart)continue;
-      seen.add(id);ts.push({raw:t,__recv:recv,__trade:trade,__i:i});
-    }ts.sort((a,b)=>a.__recv-b.__recv||a.__i-b.__i);
+    const validTick = t => t && t.row && t.row.price !== null && t.row.price !== '' && Number.isFinite(N(t.row.price)) && N(t.row.price) > 0 && t.row.volume !== null && t.row.volume !== '' && Number.isSafeInteger(N(t.row.volume)) && N(t.row.volume) >= 0;
+    const seen = new Set(), ts = [];
+    for (const [i, t] of (Array.isArray(inputTicks) ? inputTicks : []).entries()) {
+      if (!validTick(t) || code && t.code !== code) continue;
+      const recv = ms(t.first_received_at), trade = ms(t.row.time), id = t.id ?? JSON.stringify([t.code, t.row, i]);
+      if (seen.has(id) || !Number.isFinite(recv) || recv > cutoff || !Number.isFinite(trade) || trade > cutoff || Number.isFinite(sessionStart) && trade < sessionStart || targetDay && day(trade) !== targetDay || Number.isFinite(sessionStart) && recv < sessionStart) continue;
+      seen.add(id); ts.push({ raw: t, __recv: recv, __trade: trade, __i: i });
+    }
+    ts.sort((a, b) => a.__recv - b.__recv || a.__i - b.__i);
     // New detail rows close an observation interval. Repeated non-empty responses do not.
     // A successful explicitly empty response is an observable zero-trade update.
-    const updates=new Map();
-    for(const t of ts){if(!updates.has(t.__recv))updates.set(t.__recv,[]);updates.get(t.__recv).push(t);}
-    for(const r of events.filter(e=>e.kind==='tick_response'&&e.row_count===0&&!e.payload_metadata?.error))if(!updates.has(r.__t))updates.set(r.__t,[]);
-    const cumulative={bid:empty(),ask:empty()},timeline=[],windows=[],reconciliation=[];let totalVolume=0,pairIndex=0,priorUpdate=Number.isFinite(sessionStart)?sessionStart:(events[0]?.__t||ts[0]?.__recv||Date.now()),through=priorUpdate;const boundaryTotal={bid:0,ask:0};
-    for(const [end,trades] of [...updates].sort((a,b)=>a[0]-b[0])){
-      const ps=[];while(pairIndex<pairs.length&&pairs[pairIndex].t1<=end)ps.push(pairs[pairIndex++]);
-      const levels=new Map(),metrics={bid:empty(),ask:empty()},boundary={bid:0,ask:0};
-      const level=(side,price)=>{const key=side+':'+price;if(!levels.has(key))levels.set(key,{side,price,added_shares:0,visible_added_shares:0,observed_reduction_shares:0,reduction_shares:0,cancellation_shares:0,trade_credit_shares:0,executed_shares:0,net_change_shares:0,observations:[]});return levels.get(key);};
-      for(const p of ps){for(const side of ['bid','ask'])for(const x of [...p.old.a[side],...p.new.a[side]])level(side,x.price);
-        for(const d of p.details){if(d.delta_shares===null){boundary[d.side]+=d.before_shares??d.after_shares;continue;}d.statistics_eligible=true;const z=level(d.side,d.price);z.added_shares+=Math.max(0,d.delta_shares);z.observed_reduction_shares+=Math.max(0,-d.delta_shares);z.observations.push(...d.observations);if(z.before_shares==null)z.before_shares=d.before_shares;z.after_shares=d.after_shares;}
-      }
-      // Use all observed endpoint books in this update, not trade direction labels.
-      const priceSides=new Map();for(const p of ps)for(const q of [p.old,p.new])for(const side of ['bid','ask'])for(const x of q.a[side]){if(!priceSides.has(x.price))priceSides.set(x.price,new Set());priceSides.get(x.price).add(side);}
-      let ambiguous=0;
-      for(const t of trades){const price=N(t.raw.row.price),sides=priceSides.get(price),v=N(t.raw.row.volume);if(sides?.size===1)level([...sides][0],price).executed_shares+=v;else if(sides?.size>1)ambiguous+=v;}
-      const volume=trades.reduce((n,t)=>n+N(t.raw.row.volume),0);totalVolume+=volume;
-      for(const z of levels.values()){
-        z.visible_added_shares=z.added_shares;z.added_shares+=Math.max(0,z.executed_shares-z.observed_reduction_shares);z.reduction_shares=z.observed_reduction_shares;z.trade_credit_shares=Math.min(z.observed_reduction_shares,z.executed_shares);z.cancellation_shares=Math.max(0,z.observed_reduction_shares-z.executed_shares);z.net_change_shares=z.added_shares-z.cancellation_shares;z.denominator_trade_shares=volume;finish(z);
-        Object.assign(z,{id:`${sid}:${priorUpdate}:${end}:${z.side}:${z.price}`,session_id:sid,interval_start:iso(priorUpdate),interval_end:iso(end),confirmed_at:iso(end),source_span_start:iso(ps[0]?.t0??priorUpdate),source_span_end:iso(ps.at(-1)?.t1??end),status:'trade_update_settled'});reconciliation.push(z);
-        for(const k of ['added_shares','visible_added_shares','observed_reduction_shares','cancellation_shares','trade_credit_shares'])metrics[z.side][k]+=z[k];
-      }
-      for(const side of ['bid','ask']){const m=metrics[side];m.denominator_trade_shares=volume;m.baseline_shares=baseline[side];finish(m);for(const k of ['added_shares','visible_added_shares','observed_reduction_shares','cancellation_shares','trade_credit_shares'])cumulative[side][k]+=m[k];cumulative[side].denominator_trade_shares=totalVolume;cumulative[side].baseline_shares=baseline[side];finish(cumulative[side]);boundaryTotal[side]+=boundary[side];}
-      const details=ps.flatMap(p=>p.details),counts={in_five_same_price:0,entered_five:0,left_five:0};for(const d of details)counts[d.visibility_state]++;
-      through=Math.max(through,...ps.map(p=>p.t1));
-      const w={start:iso(priorUpdate),end:iso(end),confirmed_at:iso(end),updated_at:iso(end),window_open:false,revisable:false,trade_coverage:'detail_update_received',included_in_cumulative:true,alignment_status:'settled',matched_intervals:ps.map(p=>({start:iso(p.t0),end:iso(p.t1),included:true})),source_span_start:iso(ps[0]?.t0??priorUpdate),source_span_end:iso(ps.at(-1)?.t1??end),sampling_crosses_boundary:false,bid:metrics.bid,ask:metrics.ask,boundary_shares:boundary,sample_pairs:ps.length,source_trade_rows:trades.length,source_trade_records:trades.map(t=>t.raw),source_trade_volume_shares:volume,visibility_details:details,visibility_counts:counts,levels:[...levels.values()],ambiguous_trade_shares:ambiguous,trade_attribution:'unique_observed_price_side_per_detail_update'};
-      windows.push(w);timeline.push({at:iso(end),through:iso(through),source_trade_volume_shares:totalVolume,bid:{...cumulative.bid},ask:{...cumulative.ask},instant:{start:w.start,end:w.end,bid:w.bid,ask:w.ask},confirmed_intervals:windows.length,excluded_intervals:excluded.length,boundary_shares:{...boundaryTotal}});priorUpdate=end;
+    const updates = new Map();
+    for (const t of ts) { if (!updates.has(t.__recv)) updates.set(t.__recv, []); updates.get(t.__recv).push(t); }
+    for (const r of events.filter(e => e.kind === 'tick_response' && e.row_count === 0 && !e.payload_metadata?.error)) if (!updates.has(r.__t)) updates.set(r.__t, []);
+
+    function sideAtTradeTime(tradeAt, price) {
+      const tradePhase = phase(tradeAt);
+      if (!tradePhase) return { reason: 'outside_session' };
+      let state = null;
+      for (let i = bookTimeline.length - 1; i >= 0; i--) if (bookTimeline[i].at <= tradeAt) { state = bookTimeline[i]; break; }
+      if (!state || !state.valid) return { reason: 'no_valid_snapshot' };
+      if (state.ph !== tradePhase || tradeAt - state.at > gapLimit(state.e)) return { reason: 'stale_or_wrong_phase_snapshot', snapshot_at: state.at };
+      const sides = ['bid', 'ask'].filter(side => state.q.a[side].some(x => x.price === price));
+      if (sides.length === 1) return { side: sides[0], snapshot_at: state.at };
+      if (sides.length > 1) return { reason: 'ambiguous_snapshot', snapshot_at: state.at };
+      return { reason: 'outside_top_five', snapshot_at: state.at };
     }
-    const asOf=Math.max(Number.isFinite(sessionStart)?sessionStart:0,...events.map(e=>e.__t),...ts.map(t=>t.__recv));
-    return {as_of:iso(asOf),calculation_mode:'trade_update_cumulative',source_trade_volume_shares:totalVolume,timeline,windows,reconciliation,visibility_changes:visibilityChanges,snapshots:depths.length,pending_intervals:pairs.length-pairIndex,pending_changes:visibilityChanges.filter(d=>!d.statistics_eligible&&d.delta_shares!==null),matched_intervals_count:pairIndex,candidate_intervals:pairs.length,incomplete_intervals:0,excluded_intervals:excluded.length,last_depth_at:lastDepth===null?null:iso(lastDepth),session_started_at:s.started_at||null};
+
+    const cumulative = { bid: empty(), ask: empty() }, timeline = [], windows = [], reconciliation = [];
+    let totalVolume = 0, orderBookTotal = 0, pairIndex = 0, priorUpdate = Number.isFinite(sessionStart) ? sessionStart : (events[0]?.__t || ts[0]?.__recv || Date.now()), through = priorUpdate;
+    const boundaryTotal = { bid: 0, ask: 0 }, exclusionTotals = { outside_top_five: 0, no_valid_snapshot: 0, stale_or_wrong_phase_snapshot: 0, ambiguous_snapshot: 0, outside_session: 0 };
+    for (const [end, trades] of [...updates].sort((a, b) => a[0] - b[0])) {
+      const ps = []; while (pairIndex < pairs.length && pairs[pairIndex].t1 <= end) ps.push(pairs[pairIndex++]);
+      const levels = new Map(), metrics = { bid: empty(), ask: empty() }, boundary = { bid: 0, ask: 0 };
+      const level = (side, price) => { const key = side + ':' + price; if (!levels.has(key)) levels.set(key, { side, price, added_shares: 0, visible_added_shares: 0, replenishment_shares: 0, observed_reduction_shares: 0, reduction_shares: 0, cancellation_shares: 0, trade_credit_shares: 0, executed_shares: 0, net_change_shares: 0, observations: [] }); return levels.get(key); };
+      for (const p of ps) {
+        for (const side of ['bid', 'ask']) for (const x of [...p.old.a[side], ...p.new.a[side]]) level(side, x.price);
+        for (const d of p.details) {
+          if (d.delta_shares === null) { boundary[d.side] += d.before_shares ?? d.after_shares; continue; }
+          d.statistics_eligible = true;
+          const z = level(d.side, d.price); z.added_shares += Math.max(0, d.delta_shares); z.observed_reduction_shares += Math.max(0, -d.delta_shares); z.observations.push(...d.observations);
+          if (z.before_shares == null) z.before_shares = d.before_shares; z.after_shares = d.after_shares;
+        }
+      }
+      let eligibleVolume = 0, excludedUpdateVolume = 0, ambiguousUpdateVolume = 0;
+      const classification = [];
+      for (const t of trades) {
+        const price = N(t.raw.row.price), volume = N(t.raw.row.volume), match = sideAtTradeTime(t.__trade, price);
+        const item = { id: t.raw.id ?? null, price, volume_shares: volume, trade_at: iso(t.__trade), side: match.side || null, snapshot_at: Number.isFinite(match.snapshot_at) ? iso(match.snapshot_at) : null, excluded_reason: match.reason || null, aggressor_side: null };
+        classification.push(item);
+        if (match.side) { level(match.side, price).executed_shares += volume; eligibleVolume += volume; }
+        else { excludedUpdateVolume += volume; exclusionTotals[match.reason] = (exclusionTotals[match.reason] || 0) + volume; if (match.reason === 'ambiguous_snapshot') ambiguousUpdateVolume += volume; }
+      }
+      const volume = trades.reduce((n, t) => n + N(t.raw.row.volume), 0); totalVolume += volume; orderBookTotal += eligibleVolume;
+      for (const z of levels.values()) {
+        z.visible_added_shares = z.added_shares;
+        z.replenishment_shares = Math.max(0, z.executed_shares - z.observed_reduction_shares);
+        z.added_shares = z.visible_added_shares + z.replenishment_shares;
+        z.reduction_shares = z.observed_reduction_shares;
+        z.trade_credit_shares = Math.min(z.observed_reduction_shares, z.executed_shares);
+        z.cancellation_shares = Math.max(0, z.observed_reduction_shares - z.executed_shares);
+        z.net_change_shares = z.added_shares - z.cancellation_shares;
+        z.denominator_trade_shares = eligibleVolume; finish(z);
+        Object.assign(z, { id: `${sid}:${priorUpdate}:${end}:${z.side}:${z.price}`, session_id: sid, interval_start: iso(priorUpdate), interval_end: iso(end), confirmed_at: iso(end), source_span_start: iso(ps[0]?.t0 ?? priorUpdate), source_span_end: iso(ps.at(-1)?.t1 ?? end), status: 'trade_update_settled' });
+        reconciliation.push(z);
+        for (const k of ['added_shares', 'visible_added_shares', 'replenishment_shares', 'executed_shares', 'observed_reduction_shares', 'cancellation_shares', 'trade_credit_shares']) metrics[z.side][k] += z[k];
+      }
+      for (const side of ['bid', 'ask']) {
+        const m = metrics[side]; m.denominator_trade_shares = eligibleVolume; m.baseline_shares = baseline[side]; finish(m);
+        for (const k of ['added_shares', 'visible_added_shares', 'replenishment_shares', 'executed_shares', 'observed_reduction_shares', 'cancellation_shares', 'trade_credit_shares']) cumulative[side][k] += m[k];
+        cumulative[side].denominator_trade_shares = orderBookTotal; cumulative[side].baseline_shares = baseline[side]; finish(cumulative[side]); boundaryTotal[side] += boundary[side];
+      }
+      const details = ps.flatMap(p => p.details), switches = ps.flatMap(p => p.side_switches), counts = { in_five_same_price: 0, entered_five: 0, left_five: 0 };
+      for (const d of details) counts[d.visibility_state]++;
+      through = Math.max(through, ...ps.map(p => p.t1));
+      const w = { start: iso(priorUpdate), end: iso(end), confirmed_at: iso(end), updated_at: iso(end), window_open: false, revisable: false, trade_coverage: 'detail_update_received', included_in_cumulative: true, alignment_status: 'settled', matched_intervals: ps.map(p => ({ start: iso(p.t0), end: iso(p.t1), included: true })), source_span_start: iso(ps[0]?.t0 ?? priorUpdate), source_span_end: iso(ps.at(-1)?.t1 ?? end), sampling_crosses_boundary: false, bid: metrics.bid, ask: metrics.ask, boundary_shares: boundary, sample_pairs: ps.length, source_trade_rows: trades.length, source_trade_records: trades.map(t => t.raw), source_trade_volume_shares: volume, order_book_trade_volume_shares: eligibleVolume, excluded_trade_volume_shares: excludedUpdateVolume, trade_classifications: classification, visibility_details: details, side_switches: switches, side_switch_count: switches.length, visibility_counts: counts, levels: [...levels.values()], ambiguous_trade_shares: ambiguousUpdateVolume, trade_attribution: 'latest_valid_top_five_side_at_or_before_trade_time', trade_side_semantics: 'observed_quote_side_not_aggressor', aggressor_direction_available: false };
+      windows.push(w);
+      timeline.push({ at: iso(end), through: iso(through), source_trade_volume_shares: totalVolume, order_book_trade_volume_shares: orderBookTotal, excluded_trade_volume_shares: totalVolume - orderBookTotal, bid: { ...cumulative.bid }, ask: { ...cumulative.ask }, instant: { start: w.start, end: w.end, bid: w.bid, ask: w.ask }, confirmed_intervals: windows.length, excluded_intervals: excluded.length, boundary_shares: { ...boundaryTotal } });
+      priorUpdate = end;
+    }
+    const asOf = Math.max(Number.isFinite(sessionStart) ? sessionStart : 0, ...events.map(e => e.__t), ...ts.map(t => t.__recv));
+    return { as_of: iso(asOf), calculation_mode: 'trade_update_cumulative', source_trade_volume_shares: totalVolume, order_book_trade_volume_shares: orderBookTotal, excluded_trade_volume_shares: totalVolume - orderBookTotal, excluded_trade_volume_by_reason: exclusionTotals, trade_attribution: 'latest_valid_top_five_side_at_or_before_trade_time', trade_side_semantics: 'observed_quote_side_not_aggressor', aggressor_direction_available: false, timeline, windows, reconciliation, visibility_changes: visibilityChanges, side_switches: sideSwitches, snapshots: depths.length, pending_intervals: pairs.length - pairIndex, pending_changes: visibilityChanges.filter(d => !d.statistics_eligible && d.delta_shares !== null), matched_intervals_count: pairIndex, candidate_intervals: pairs.length, incomplete_intervals: 0, excluded_intervals: excluded.length, last_depth_at: lastDepth === null ? null : iso(lastDepth), session_started_at: s.started_at || null };
   }
   return { calculate };
 })();
 if (typeof module !== 'undefined') module.exports = BookThreeSecondCalculator;
 if (typeof globalThis !== 'undefined') globalThis.BookThreeSecondCalculator = BookThreeSecondCalculator;
 
-/* Independent trade-update cumulative audit.  It deliberately rebuilds all
- * comparisons from raw depth events; result is evidence to compare, not input. */
+/* Independent trade-update cumulative audit. It rebuilds eligible trade attribution from raw data. */
 const BookStatisticsAudit = (() => {
   const num = v => typeof v === 'number' ? v : Number(v);
-  const time = v => {
-    if (typeof v === 'number') return v < 2e11 ? v * 1000 : v;
-    const n = Date.parse(v); return Number.isFinite(n) ? n : NaN;
-  };
+  const time = v => { if (typeof v === 'number') return v < 2e11 ? v * 1000 : v; const n = Date.parse(v); return Number.isFinite(n) ? n : NaN; };
   const iso = n => Number.isFinite(n) ? new Date(n).toISOString() : null;
-  const same = (a,b) => Object.is(a,b) || (Number.isFinite(a)&&Number.isFinite(b)&&a===b);
+  const same = (a, b) => Object.is(a, b) || (Number.isFinite(a) && Number.isFinite(b) && a === b);
   const rowsOf = e => Array.isArray(e?.payload?.rows) ? e.payload.rows : (Array.isArray(e?.rows) ? e.rows : []);
+  const day = t => new Date(t + 28800000).toISOString().slice(0, 10);
+  const phase = t => { const d = new Date(t + 28800000), m = d.getUTCHours() * 60 + d.getUTCMinutes() + d.getUTCSeconds() / 60; return m >= 570 && m <= 690 ? 'am' : m >= 780 && m < 897 ? 'pm' : null; };
+  const gapLimit = e => { const n = num(e?.gap_limit_ms || 5000); return Math.max(5000, Number.isFinite(n) ? n : 5000); };
   function snapshot(e, i) {
-    const at = time(e?.__recv ?? e?.received_at ?? e?.__t ?? e?.fetched_at);
-    const out = { at, i, bid:new Map(), ask:new Map(), raw:rowsOf(e), changes:Array.isArray(e?.changes)?e.changes:null };
+    const at = time(e?.__recv ?? e?.received_at ?? e?.__t ?? e?.fetched_at), raw = rowsOf(e), out = { at, i, bid: new Map(), ask: new Map(), raw, event: e };
+    const levels = { bid: new Set(), ask: new Set() };
     if (!Number.isFinite(at)) return null;
-    for (const r of out.raw) {
-      const side=String(r?.side??'').toLowerCase(), p=num(r?.price), v=num(r?.volume ?? r?.shares);
-      if ((side==='bid'||side==='ask') && Number.isFinite(p) && p>0 && Number.isFinite(v) && v>=0) {
-        // duplicate prices are not safely attributable; retain the first and mark ambiguous.
-        const m=out[side]; if (m.has(p)) m.set(p, NaN); else m.set(p,v);
+    for (const r of raw) {
+      const side = String(r?.side ?? '').toLowerCase(), p = num(r?.price), v = num(r?.volume ?? r?.shares), l = num(r?.level);
+      if ((side === 'bid' || side === 'ask') && Number.isInteger(l) && l >= 1 && l <= 5 && Number.isFinite(p) && p > 0 && Number.isSafeInteger(v) && v >= 0) {
+        if (out[side].has(p)) out[side].set(p, NaN); else out[side].set(p, v);
+        levels[side].add(l);
       }
     }
-    out.valid = out.raw.length===10&&out.bid.size===5&&out.ask.size===5&&[...out.bid.values(),...out.ask.values()].every(v=>Number.isSafeInteger(v)&&v>=0)&&Math.max(...out.bid.keys())<Math.min(...out.ask.keys()); out.event=e;
+    out.valid = raw.length === 10 && out.bid.size === 5 && out.ask.size === 5 && levels.bid.size === 5 && levels.ask.size === 5 && [...out.bid.values(), ...out.ask.values()].every(v => Number.isSafeInteger(v) && v >= 0) && Math.max(...out.bid.keys()) < Math.min(...out.ask.keys());
     return out;
   }
   function tickInfo(t, i) {
-    const row=t?.row || t?.raw?.row || t;
-    const recv=time(t?.__recv ?? t?.first_received_at ?? t?.received_at ?? t?.__t);
-    const trade=time(row?.time ?? t?.trade_time);
-    const vol=num(row?.volume ?? row?.shares ?? row?.qty);
-    const price=num(row?.price);
-    return {raw:t, i, recv, trade, vol, price, valid:Number.isFinite(recv)&&Number.isFinite(trade)&&Number.isFinite(vol)&&vol>=0&&Number.isFinite(price)&&price>0};
+    const row = t?.row || t?.raw?.row || t, recv = time(t?.__recv ?? t?.first_received_at ?? t?.received_at ?? t?.__t), trade = time(row?.time ?? t?.trade_time), vol = num(row?.volume ?? row?.shares ?? row?.qty), price = num(row?.price);
+    return { raw: t, i, recv, trade, vol, price, valid: Number.isFinite(recv) && Number.isFinite(trade) && Number.isFinite(vol) && vol >= 0 && Number.isFinite(price) && price > 0 };
   }
   function responseTimes(events) {
-    return events.map((e,i)=>({e,i,at:time(e?.__recv??e?.received_at??e?.__t),
-      ok:e?.ok!==false && e?.success!==false && !e?.payload_metadata?.error && e?.kind==='tick_response' && e?.row_count===0,
-      rows:Array.isArray(e?.payload?.rows)?e.payload.rows:(Array.isArray(e?.rows)?e.rows:null)}))
-      .filter(x=>x.ok&&Number.isFinite(x.at));
+    return events.map((e, i) => ({ e, i, at: time(e?.__recv ?? e?.received_at ?? e?.__t), ok: e?.ok !== false && e?.success !== false && !e?.payload_metadata?.error && e?.kind === 'tick_response' && e?.row_count === 0 }))
+      .filter(x => x.ok && Number.isFinite(x.at));
   }
   function calculate(events, ticks, session, result) {
-    events=Array.isArray(events)?events:[]; ticks=Array.isArray(ticks)?ticks:[]; session=session||{}; result=result||{};
-    const start=time(session.started_at ?? session.start ?? session.session_start);
-    const asOf=time(result.as_of); const day=t=>new Date(t+28800000).toISOString().slice(0,10); events=events.filter(e=>e.session_id===session.id&&(!session.code||!e.code||e.code===session.code)&&(!session.day||day(time(e.received_at))===session.day)); ticks=ticks.filter(t=>(!session.code||t.code===session.code)&&(!session.day||Number.isFinite(time(t.row?.time))&&day(time(t.row.time))===session.day)); const seen=new Set(); ticks=ticks.filter(t=>{if(t.id==null)return true;if(seen.has(t.id))return false;seen.add(t.id);return true;});
-    const depth=events.filter(e=>e.kind==='depth').map(snapshot).filter(x=>x&&(!Number.isFinite(start)||x.at>=start)&&(!Number.isFinite(asOf)||x.at<=asOf)).sort((a,b)=>a.at-b.at||a.i-b.i);
-    const ti=ticks.map(tickInfo).filter(x=>x.valid&&(!Number.isFinite(start)||x.trade>=start&&x.recv>=start)&&(!Number.isFinite(asOf)||x.recv<=asOf)).sort((a,b)=>a.recv-b.recv||a.i-b.i);
-    // A successful empty response is an update too.  Records sharing a receive
-    // timestamp belong to one update and are never silently discarded.
-    const updates=new Map();
-    for(const x of ti){ const k=x.recv; if(!updates.has(k))updates.set(k,[]); updates.get(k).push(x); }
-    // Some recorders put an empty successful response in ticks rather than events.
-    for(const t of ticks){ const at=time(t?.__recv??t?.first_received_at??t?.received_at); const empty=Array.isArray(t?.rows)&&t.rows.length===0; if(empty&&Number.isFinite(at)&&(!Number.isFinite(start)||at>=start)&&(!Number.isFinite(asOf)||at<=asOf)&&!updates.has(at))updates.set(at,[]); }
-    for(const x of responseTimes(events)) { if(Number.isFinite(asOf)&&x.at>asOf)continue; if(Number.isFinite(start)&&x.at<start)continue; if(!updates.has(x.at))updates.set(x.at,[]); }
-    const uts=[...updates.keys()].sort((a,b)=>a-b);
-    const sourceAt = (end) => ti.filter(x=>x.recv===end); // exact response/update ownership
-    const emptySide=()=>({levels:[],A:0,R:0,T:0,add:0,reduction:0,cancel:0,net:0});
-    const comparePairs=(lo,hi) => {
-      const pairs=[];
-      for(let j=1;j<depth.length;j++) if(depth[j].at>lo&&depth[j].at<=hi&&depth[j-1].at<=hi) {
-        const curEvent=depth[j].event, oldEvent=depth[j-1].event, gap=depth[j].at-depth[j-1].at; const phase=t=>{const d=new Date(t+28800000),m=d.getUTCHours()*60+d.getUTCMinutes()+d.getUTCSeconds()/60;return m>=570&&m<=690?'am':m>=780&&m<897?'pm':null;};
-        if(!depth[j].valid||!depth[j-1].valid||curEvent.segment_id!==oldEvent.segment_id||gap<=0||gap>Math.max(5000,num(curEvent.gap_limit_ms||5000))||curEvent.gap_warning||!phase(depth[j].at)||phase(depth[j].at)!==phase(depth[j-1].at)||events.some(e=>e.kind==='feed_error'&&e.feed==='depth'&&time(e.received_at)>depth[j-1].at&&time(e.received_at)<=depth[j].at))continue;
-        const old=depth[j-1], cur=depth[j], by={bid:new Map(),ask:new Map()};
-        for(const side of ['bid','ask']) for(const [p,b] of old[side]) if(cur[side].has(p)) {
-          const a=cur[side].get(p); if(!Number.isFinite(b)||!Number.isFinite(a))continue;
-          const d=a-b; if(!d)continue; by[side].set(p,(by[side].get(p)||0)+d);
-        }
-        pairs.push({start:iso(old.at),end:iso(cur.at),start_ms:old.at,end_ms:cur.at,by,old,cur});
+    events = Array.isArray(events) ? events : []; ticks = Array.isArray(ticks) ? ticks : []; session = session || {}; result = result || {};
+    const start = time(session.started_at ?? session.start ?? session.session_start), asOf = time(result.as_of), sessionDay = session.day;
+    events = events.filter(e => e.session_id === session.id && (!session.code || !e.code || e.code === session.code) && (!sessionDay || day(time(e.received_at)) === sessionDay))
+      .map((e, i) => ({ ...e, __recv: time(e.received_at), __i: i })).filter(e => Number.isFinite(e.__recv) && (!Number.isFinite(start) || e.__recv >= start) && (!Number.isFinite(asOf) || e.__recv <= asOf)).sort((a, b) => a.__recv - b.__recv || a.__i - b.__i);
+    const seen = new Set();
+    ticks = ticks.filter(t => (!session.code || t.code === session.code) && (!sessionDay || Number.isFinite(time(t.row?.time)) && day(time(t.row.time)) === sessionDay)).filter(t => { if (t.id == null) return true; if (seen.has(t.id)) return false; seen.add(t.id); return true; });
+    const depth = events.filter(e => e.kind === 'depth').map(snapshot).filter(x => x && (!Number.isFinite(start) || x.at >= start) && (!Number.isFinite(asOf) || x.at <= asOf)).sort((a, b) => a.at - b.at || a.i - b.i);
+    const ti = ticks.map(tickInfo).filter(x => x.valid && (!Number.isFinite(start) || x.trade >= start && x.recv >= start) && (!Number.isFinite(asOf) || x.recv <= asOf)).sort((a, b) => a.recv - b.recv || a.i - b.i);
+    const updates = new Map();
+    for (const x of ti) { if (!updates.has(x.recv)) updates.set(x.recv, []); updates.get(x.recv).push(x); }
+    for (const x of responseTimes(events)) { if (Number.isFinite(asOf) && x.at > asOf || Number.isFinite(start) && x.at < start) continue; if (!updates.has(x.at)) updates.set(x.at, []); }
+    const uts = [...updates.keys()].sort((a, b) => a - b), sourceAt = end => ti.filter(x => x.recv === end);
+    function sideAtTradeTime(tradeAt, price) {
+      const tradePhase = phase(tradeAt); if (!tradePhase) return { reason: 'outside_session' };
+      let state = null; for (let i = depth.length - 1; i >= 0; i--) if (depth[i].at <= tradeAt) { state = depth[i]; break; }
+      if (!state || !state.valid) return { reason: 'no_valid_snapshot' };
+      if (phase(state.at) !== tradePhase || tradeAt - state.at > gapLimit(state.event)) return { reason: 'stale_or_wrong_phase_snapshot', snapshot_at: state.at };
+      const sides = ['bid', 'ask'].filter(s => state[s].has(price) && Number.isFinite(state[s].get(price)));
+      if (sides.length === 1) return { side: sides[0], snapshot_at: state.at };
+      if (sides.length > 1) return { reason: 'ambiguous_snapshot', snapshot_at: state.at };
+      return { reason: 'outside_top_five', snapshot_at: state.at };
+    }
+    const pairsFor = (lo, hi) => {
+      const pairs = [];
+      for (let j = 1; j < depth.length; j++) if (depth[j].at > lo && depth[j].at <= hi && depth[j - 1].at <= hi) {
+        const cur = depth[j], old = depth[j - 1], curEvent = cur.event, oldEvent = old.event, gap = cur.at - old.at;
+        if (!cur.valid || !old.valid || curEvent.segment_id !== oldEvent.segment_id || gap <= 0 || gap > gapLimit(curEvent) || curEvent.gap_warning || !phase(cur.at) || phase(cur.at) !== phase(old.at) || events.some(e => e.kind === 'feed_error' && e.feed === 'depth' && e.__recv > old.at && e.__recv <= cur.at)) continue;
+        const by = { bid: new Map(), ask: new Map() };
+        for (const side of ['bid', 'ask']) for (const [p, b] of old[side]) if (cur[side].has(p)) { const a = cur[side].get(p); if (!Number.isFinite(b) || !Number.isFinite(a)) continue; const d = a - b; if (d) by[side].set(p, d); }
+        pairs.push({ start: iso(old.at), end: iso(cur.at), start_ms: old.at, end_ms: cur.at, by, old, cur });
       }
       return pairs;
     };
-    const windows=[]; let prev=Number.isFinite(start)?start:(uts.length?uts[0]:NaN);
-    const cumulative={bid:emptySide(),ask:emptySide(),source:0};
-    for(const end of uts){
-      const source=sourceAt(end), pairs=comparePairs(prev,end), levels={bid:new Map(),ask:new Map()};
-      for(const p of pairs) for(const side of ['bid','ask']) for(const [price,d] of p.by[side]) {
-        const z=levels[side].get(price)||{side,price,A:0,R:0,T:0,net:0,observations:[]};
-        if(d>0)z.A+=d; else z.R+=-d; z.observations.push({start:p.start,end:p.end,delta:d}); levels[side].set(price,z);
+    const windows = []; let prev = Number.isFinite(start) ? start : (uts.length ? uts[0] : NaN);
+    const cumulative = { bid: { added_shares: 0, cancellation_shares: 0, executed_shares: 0, replenishment_shares: 0, denominator_trade_shares: 0 }, ask: { added_shares: 0, cancellation_shares: 0, executed_shares: 0, replenishment_shares: 0, denominator_trade_shares: 0 }, source: 0, eligible: 0 };
+    for (const end of uts) {
+      const source = sourceAt(end), pairs = pairsFor(prev, end), levels = { bid: new Map(), ask: new Map() };
+      for (const p of pairs) for (const side of ['bid', 'ask']) for (const [price, d] of p.by[side]) {
+        const z = levels[side].get(price) || { side, price, visible_added_shares: 0, observed_reduction_shares: 0, executed_shares: 0, replenishment_shares: 0, trade_credit_shares: 0, added_shares: 0, cancellation_shares: 0, net_change_shares: 0, observations: [] };
+        if (d > 0) z.visible_added_shares += d; else z.observed_reduction_shares += -d;
+        z.observations.push({ start: p.start, end: p.end, delta: d }); levels[side].set(price, z);
       }
-      // A trade is attributed only when every snapshot in this window identifies
-      // one side at that price.  Ambiguity contributes to denominator, not T.
-      for(const x of source){
-        const sides=[]; for(const s of ['bid','ask']) if(pairs.some(p=>Number.isFinite(p.old[s].get(x.price))||Number.isFinite(p.cur[s].get(x.price))))sides.push(s);
-        if(sides.length===1){ const z=levels[sides[0]].get(x.price)||{side:sides[0],price:x.price,A:0,R:0,T:0,net:0,observations:[]}; z.T+=x.vol; levels[sides[0]].set(x.price,z); }
+      let eligibleVolume = 0;
+      const tradeClassifications = [];
+      for (const x of source) {
+        const match = sideAtTradeTime(x.trade, x.price);
+        tradeClassifications.push({ trade: x, side: match.side || null, reason: match.reason || null });
+        if (!match.side) continue;
+        const z = levels[match.side].get(x.price) || { side: match.side, price: x.price, visible_added_shares: 0, observed_reduction_shares: 0, executed_shares: 0, replenishment_shares: 0, trade_credit_shares: 0, added_shares: 0, cancellation_shares: 0, net_change_shares: 0, observations: [] };
+        z.executed_shares += x.vol; levels[match.side].set(x.price, z); eligibleVolume += x.vol;
       }
-      const sideOut={}; for(const side of ['bid','ask']) { const q=emptySide(); q.levels=[...levels[side].values()].map(z=>{z.visibleA=z.A;z.A+=Math.max(0,z.T-z.R);z.cancel=Math.max(0,z.R-z.T);z.net=z.A-z.cancel;return z;}); for(const z of q.levels){q.A+=z.A;q.R+=z.R;q.T+=z.T;q.cancel+=z.cancel;q.net+=z.net;} q.add=q.A;q.reduction=q.R;q.cancellation=q.cancel; sideOut[side]=q; }
-      const volume=source.reduce((n,x)=>n+x.vol,0), raw={bid:sideOut.bid,ask:sideOut.ask,source_trade_records:source.map(x=>x.raw),source_trade_volume_shares:volume,levels:sideOut};
-      const delta={bid_added_shares:sideOut.bid.A,bid_reduced_shares:sideOut.bid.R,bid_trade_shares:sideOut.bid.T,bid_cancellation_shares:sideOut.bid.cancel,bid_net_shares:sideOut.bid.net,ask_added_shares:sideOut.ask.A,ask_reduced_shares:sideOut.ask.R,ask_trade_shares:sideOut.ask.T,ask_cancellation_shares:sideOut.ask.cancel,ask_net_shares:sideOut.ask.net,source_trade_volume_shares:volume};
-      for(const s of ['bid','ask']){for(const k of ['A','R','T','cancel','net'])cumulative[s][k]+=sideOut[s][k];cumulative[s].add=cumulative[s].A;cumulative[s].reduction=cumulative[s].R;cumulative[s].cancellation=cumulative[s].cancel;}
-      cumulative.source+=volume;
-      const matched_intervals=pairs.map(p=>({start:p.start,end:p.end,included:true}));
-      const calc={start:iso(prev),end:iso(end),confirmed_at:iso(end),status:'pass',raw_snapshot_count:pairs.length?pairs.length+1:0,raw_comparisons:pairs.length,raw,delta,cumulative_delta:{bid:{...cumulative.bid},ask:{...cumulative.ask},source_trade_volume_shares:cumulative.source},matched_intervals,source_trade_records:source.map(x=>x.raw),levels:sideOut,issues:[]};
-      const supplied=(result.windows||[]).find(w=>iso(time(w.end))===iso(end)) || (result.windows||[])[windows.length];
-      const issues=[]; for(const p of pairs) if(p.cur.changes){ const expected=[]; for(const s of ['bid','ask']){ for(const [price,b] of p.old[s]){const a=p.cur[s].get(price);if(!p.cur[s].has(price))expected.push([s,price,b,null]);else if(Number.isFinite(a)&&a!==b)expected.push([s,price,b,a]);} for(const [price,a] of p.cur[s])if(!p.old[s].has(price))expected.push([s,price,null,a]); } const got=p.cur.changes.map(x=>[String(x.side||'').toLowerCase(),num(x.price),x.before_shares==null?null:num(x.before_shares),x.after_shares==null?null:num(x.after_shares)]); if(got.length!==expected.length||expected.some(x=>!got.some(y=>x[0]===y[0]&&x[1]===y[1]&&same(x[2],y[2])&&same(x[3],y[3]))))issues.push('raw_changes'); }
-      if(supplied){ const n=(v)=>Number(v); const checks=[['source_trade_volume_shares',supplied.source_trade_volume_shares,volume],['bid.added_shares',supplied.bid?.added_shares,sideOut.bid.A],['ask.added_shares',supplied.ask?.added_shares,sideOut.ask.A],['bid.cancellation_shares',supplied.bid?.cancellation_shares ?? supplied.bid?.observed_reduction_shares,sideOut.bid.cancel],['ask.cancellation_shares',supplied.ask?.cancellation_shares ?? supplied.ask?.observed_reduction_shares,sideOut.ask.cancel]]; for(const [k,a,b] of checks)if(a!=null&&(!Number.isFinite(n(a))||n(a)!==b))issues.push(k); if(Array.isArray(supplied.source_trade_records)&&supplied.source_trade_records.length!==source.length)issues.push('source_trade_records'); }
-      const suppliedTimeline=result.timeline?.[windows.length], cd={};
-      for(const side of ['bid','ask']) { delta[side+'_added_shares']=(supplied?.[side]?.added_shares??0)-sideOut[side].A; delta[side+'_reduced_shares']=(supplied?.[side]?.cancellation_shares??0)-sideOut[side].cancel; cd[side+'_added_shares']=(suppliedTimeline?.[side]?.added_shares??0)-cumulative[side].A; cd[side+'_reduced_shares']=(suppliedTimeline?.[side]?.cancellation_shares??0)-cumulative[side].cancel; if(cd[side+'_added_shares']||cd[side+'_reduced_shares'])issues.push(side+'_cumulative'); if(supplied?.[side]?.net_change_shares!==sideOut[side].net)issues.push(side+'_net'); }
-      delta.source_trade_volume_shares=(supplied?.source_trade_volume_shares??0)-volume;cd.source_trade_volume_shares=(suppliedTimeline?.source_trade_volume_shares??0)-cumulative.source;calc.cumulative_delta=cd;if(cd.source_trade_volume_shares)issues.push('cumulative_source');
-      calc.status=issues.length?'mismatch':(pairs.length||source.length?'pass':'incomplete');calc.issues=issues; windows.push(calc);prev=end;
+      const volume = source.reduce((n, x) => n + x.vol, 0), sideOut = {};
+      for (const side of ['bid', 'ask']) {
+        const q = { added_shares: 0, visible_added_shares: 0, replenishment_shares: 0, observed_reduction_shares: 0, executed_shares: 0, cancellation_shares: 0, trade_credit_shares: 0, net_change_shares: 0, denominator_trade_shares: eligibleVolume, levels: [] };
+        q.levels = [...levels[side].values()].map(z => {
+          z.replenishment_shares = Math.max(0, z.executed_shares - z.observed_reduction_shares);
+          z.added_shares = z.visible_added_shares + z.replenishment_shares;
+          z.trade_credit_shares = Math.min(z.observed_reduction_shares, z.executed_shares);
+          z.cancellation_shares = Math.max(0, z.observed_reduction_shares - z.executed_shares);
+          z.net_change_shares = z.added_shares - z.cancellation_shares;
+          for (const k of ['added_shares', 'visible_added_shares', 'replenishment_shares', 'observed_reduction_shares', 'executed_shares', 'cancellation_shares', 'trade_credit_shares', 'net_change_shares']) q[k] += z[k];
+          return z;
+        });
+        sideOut[side] = q;
+      }
+      const eligibleRecords = tradeClassifications.filter(x => x.side), excludedVolume = volume - eligibleVolume;
+      const supplied = (result.windows || []).find(w => time(w.end) === end) || (result.windows || [])[windows.length];
+      const issues = [];
+      for (const p of pairs) if (p.cur.event.changes) {
+        const expected = [];
+        for (const s of ['bid', 'ask']) { for (const [price, b] of p.old[s]) { const a = p.cur[s].get(price); if (!p.cur[s].has(price)) expected.push([s, price, b, null]); else if (Number.isFinite(a) && a !== b) expected.push([s, price, b, a]); } for (const [price, a] of p.cur[s]) if (!p.old[s].has(price)) expected.push([s, price, null, a]); }
+        const got = p.cur.event.changes.map(x => [String(x.side || '').toLowerCase(), num(x.price), x.before_shares == null ? null : num(x.before_shares), x.after_shares == null ? null : num(x.after_shares)]);
+        if (got.length !== expected.length || expected.some(x => !got.some(y => x[0] === y[0] && x[1] === y[1] && same(x[2], y[2]) && same(x[3], y[3])))) issues.push('raw_changes');
+      }
+      const delta = { bid_added_shares: 0, bid_reduced_shares: 0, bid_executed_shares: 0, ask_added_shares: 0, ask_reduced_shares: 0, ask_executed_shares: 0, source_trade_volume_shares: 0, order_book_trade_volume_shares: 0, excluded_trade_volume_shares: 0 };
+      if (supplied) {
+        const checks = [['source_trade_volume_shares', supplied.source_trade_volume_shares, volume], ['order_book_trade_volume_shares', supplied.order_book_trade_volume_shares, eligibleVolume], ['excluded_trade_volume_shares', supplied.excluded_trade_volume_shares, excludedVolume]];
+        for (const side of ['bid', 'ask']) for (const [field, expected] of [['added_shares', sideOut[side].added_shares], ['cancellation_shares', sideOut[side].cancellation_shares], ['executed_shares', sideOut[side].executed_shares], ['replenishment_shares', sideOut[side].replenishment_shares], ['denominator_trade_shares', eligibleVolume]]) checks.push([`${side}.${field}`, supplied[side]?.[field], expected]);
+        for (const [key, actual, expected] of checks) if (actual != null && (!Number.isFinite(num(actual)) || num(actual) !== expected)) issues.push(key);
+        if (Array.isArray(supplied.source_trade_records) && supplied.source_trade_records.length !== source.length) issues.push('source_trade_records');
+      }
+      const suppliedTimeline = result.timeline?.[windows.length], cumulativeDelta = {};
+      for (const side of ['bid', 'ask']) {
+        for (const k of ['added_shares', 'cancellation_shares', 'executed_shares', 'replenishment_shares']) cumulative[side][k] += sideOut[side][k];
+        cumulative[side].denominator_trade_shares += eligibleVolume;
+        delta[side + '_added_shares'] = (supplied?.[side]?.added_shares ?? sideOut[side].added_shares) - sideOut[side].added_shares;
+        delta[side + '_reduced_shares'] = (supplied?.[side]?.cancellation_shares ?? sideOut[side].cancellation_shares) - sideOut[side].cancellation_shares;
+        delta[side + '_executed_shares'] = (supplied?.[side]?.executed_shares ?? sideOut[side].executed_shares) - sideOut[side].executed_shares;
+        for (const k of ['added_shares', 'cancellation_shares', 'executed_shares', 'replenishment_shares']) {
+          const expected = cumulative[side][k], actual = suppliedTimeline?.[side]?.[k];
+          cumulativeDelta[side + '_' + k] = actual == null ? 0 : actual - expected;
+          if (cumulativeDelta[side + '_' + k]) issues.push(side + '_cumulative_' + k);
+        }
+        const actualDenominator = suppliedTimeline?.[side]?.denominator_trade_shares;
+        cumulativeDelta[side + '_denominator_trade_shares'] = actualDenominator == null ? 0 : actualDenominator - cumulative[side].denominator_trade_shares;
+        if (cumulativeDelta[side + '_denominator_trade_shares']) issues.push(side + '_cumulative_denominator');
+        if (supplied?.[side]?.net_change_shares != null && supplied[side].net_change_shares !== sideOut[side].added_shares - sideOut[side].cancellation_shares) issues.push(side + '_net');
+      }
+      delta.source_trade_volume_shares = (supplied?.source_trade_volume_shares ?? volume) - volume;
+      delta.order_book_trade_volume_shares = (supplied?.order_book_trade_volume_shares ?? eligibleVolume) - eligibleVolume;
+      delta.excluded_trade_volume_shares = (supplied?.excluded_trade_volume_shares ?? excludedVolume) - excludedVolume;
+      cumulative.source += volume; cumulative.eligible += eligibleVolume;
+      cumulativeDelta.source_trade_volume_shares = (suppliedTimeline?.source_trade_volume_shares ?? cumulative.source) - cumulative.source;
+      cumulativeDelta.order_book_trade_volume_shares = (suppliedTimeline?.order_book_trade_volume_shares ?? cumulative.eligible) - cumulative.eligible;
+      cumulativeDelta.excluded_trade_volume_shares = (suppliedTimeline?.excluded_trade_volume_shares ?? (cumulative.source - cumulative.eligible)) - (cumulative.source - cumulative.eligible);
+      if (cumulativeDelta.source_trade_volume_shares || cumulativeDelta.order_book_trade_volume_shares || cumulativeDelta.excluded_trade_volume_shares) issues.push('cumulative_trade_volume');
+      const calc = { start: iso(prev), end: iso(end), confirmed_at: iso(end), status: 'pass', raw_snapshot_count: pairs.length ? pairs.length + 1 : 0, raw_comparisons: pairs.length, raw: { bid: sideOut.bid, ask: sideOut.ask, source_trade_records: source.map(x => x.raw), source_trade_volume_shares: volume, order_book_trade_volume_shares: eligibleVolume, excluded_trade_volume_shares: excludedVolume, trade_classifications: tradeClassifications }, delta, cumulative_delta: cumulativeDelta, matched_intervals: pairs.map(p => ({ start: p.start, end: p.end, included: true })), source_trade_records: source.map(x => x.raw), levels: sideOut, issues };
+      calc.status = issues.length ? 'mismatch' : (pairs.length || source.length ? 'pass' : 'incomplete');
+      windows.push(calc); prev = end;
     }
-    return {as_of:result.as_of||null,calculation_mode:'trade_update_cumulative',windows,scope:'独立从原始events重建有效快照对、成交来源与逐价A/R/T；边界变化不推断'};
+    return { as_of: result.as_of || null, calculation_mode: 'trade_update_cumulative', windows, scope: '独立从原始盘口与逐笔重建；逐笔按交易时间最近的有效五档可见侧归类；五档外成交排除；报价侧不等于主动方向' };
   }
-  return {calculate};
+  return { calculate };
 })();
 if(typeof module!=='undefined')module.exports=BookStatisticsAudit;
 if(typeof globalThis!=='undefined')globalThis.BookStatisticsAudit=BookStatisticsAudit;
