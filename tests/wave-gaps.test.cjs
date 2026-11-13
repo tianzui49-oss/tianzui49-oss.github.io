@@ -126,3 +126,19 @@ test('盘口已在11:00结束、成交响应迟到11:20：水平延伸从11:00�
   assert.ok(h.slide('11:10:00').text.includes('此时未观测'));
   h.dom.window.close();
 });
+
+test('14:10停止后次日凌晨收到缓存成交：不能把尾线折回09:30，须向右到15:00', () => {
+  const a = interval('13:57:20', '14:09:55', 300);
+  const b = interval('14:09:55', '14:10:54', 500);
+  const late = { ...b, start: b.end, end: at('02:40:00') + 86400000, spans: [], volume: 2000, activeBuy: 2000, activeSell: 0, bidNet: 0, askNet: 0, bidAdded: 0, askAdded: 0 };
+  const h = load([a, b, late]);
+  for (const kind of ['added', 'cancelled', 'net']) for (const side of ['bid', 'ask']) {
+    const p = h.pts(kind, side);
+    assert.equal(p.at(-1)[0], 400, 'tail must end at the right edge (15:00)');
+    assert.equal(p.at(-1)[1], p.at(-2)[1], 'tail must be horizontal');
+    assert.ok(p.every((point, i) => !i || point[0] >= p[i - 1][0]), 'time must never go backwards');
+  }
+  assert.equal(h.d.querySelector('#bookWavePanel').dataset.points, '2', 'the following-day receipt is not a current-day observation');
+  assert.ok(h.slide('14:30:00').text.includes('此时未观测'));
+  h.dom.window.close();
+});

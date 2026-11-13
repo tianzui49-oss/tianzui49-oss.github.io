@@ -1401,7 +1401,8 @@ const bookRecorder = (() => {
       if (!c.dirty && c.cutoff === Infinity && c.result && c.resultSession === expectedKey) { result = c.result; session = DerivedRateReset.sessionFor(chosen, c.rateMarker); }
       else ({ result, session } = waveResultFor(c, chosen));
     }
-    const windows = (result?.windows || []).map(w => ({ start: Date.parse(w.start), end: Date.parse(w.end), spans: (w.matched_intervals || []).map(x => [Date.parse(x.start), Date.parse(x.end)]), volume: w.source_trade_volume_shares, activeBuy: w.active_buy_shares, activeSell: w.active_sell_shares, bidAdded: w.bid?.added_shares, bidCancelled: w.bid?.cancellation_shares, bidNet: w.bid?.net_change_shares, askAdded: w.ask?.added_shares, askCancelled: w.ask?.cancellation_shares, askNet: w.ask?.net_change_shares }));
+    const chartOpen = Date.parse(`${day}T09:30:00+08:00`), chartClose = Date.parse(`${day}T15:00:00+08:00`);
+    const windows = (result?.windows || []).filter(w => { const end = Date.parse(w.end); return end >= chartOpen && end <= chartClose; }).map(w => ({ start: Date.parse(w.start), end: Date.parse(w.end), spans: (w.matched_intervals || []).map(x => [Date.parse(x.start), Date.parse(x.end)]), volume: w.source_trade_volume_shares, activeBuy: w.active_buy_shares, activeSell: w.active_sell_shares, bidAdded: w.bid?.added_shares, bidCancelled: w.bid?.cancellation_shares, bidNet: w.bid?.net_change_shares, askAdded: w.ask?.added_shares, askCancelled: w.ask?.cancellation_shares, askNet: w.ask?.net_change_shares }));
     const last = windows.at(-1), key = JSON.stringify([code, day, session?.id || '', session?.started_at || '', windows.length, last?.end || 0, last?.volume || 0]);
     if (key === wavePublished) return;
     wavePublished = key;
@@ -1696,6 +1697,6 @@ window.addEventListener('blur',()=>{if(chartGesture)finishChartGesture();else if
 // Tap toggling happens only on pointerup, never on the synthetic click after a swipe.
 </script>
 
-	<script src="./ui-parity.js?v=2f8341af72d7a5ff"></script>
+	<script src="./ui-parity.js?v=ed2dae0dc5e1021c"></script>
 </body>
 </html>

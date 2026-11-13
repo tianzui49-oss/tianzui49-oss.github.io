@@ -188,8 +188,10 @@
 
     let model = { pts: [], real: [], bars: null, t0: null }, latest = null, drawQueued = false, active = null, lastHover = null;
     function build(data) {
-      const rows = (data?.windows || []).filter(w => Number.isFinite(w.end)).sort((a, b) => a.end - b.end);
       const open = Date.parse(`${data?.day}T09:30:00+08:00`), close = Date.parse(`${data?.day}T15:00:00+08:00`);
+      // A cached trade can first arrive on the next day. It must not fold back
+      // to 09:30 in this day's chart or prevent the rightward closing hold.
+      const rows = (data?.windows || []).filter(w => Number.isFinite(w.end) && w.end >= open && w.end <= close).sort((a, b) => a.end - b.end);
       if (!rows.length) return { pts: [], real: [], bars: null, t0: null, open, coverage: [] };
       const firstSpan = (rows[0].spans || []).filter(s => Number.isFinite(s[0])).sort((a, b) => a[0] - b[0])[0];
       const started = Date.parse(data?.started_at);
@@ -200,7 +202,7 @@
       let covered = t0, j = 0;
       const bars = { buy: new Float64Array(240), sell: new Float64Array(240), has: new Uint8Array(240) };
       rows.forEach((w, i) => {
-        const spans = (w.spans || []).filter(s => Number.isFinite(s[0]) && Number.isFinite(s[1]) && s[1] >= s[0]).sort((a, b) => a[0] - b[0]);
+        const spans = (w.spans || []).filter(s => Number.isFinite(s[0]) && Number.isFinite(s[1]) && s[1] >= s[0]).map(([a, b]) => [Math.max(open, a), Math.min(w.end, close, b)]).filter(([a, b]) => b >= a).sort((a, b) => a[0] - b[0]);
         let observed = 0;
         for (const [a, b] of spans) {
           const lastCoverage = coverage[coverage.length - 1];
