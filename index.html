@@ -957,9 +957,21 @@ const BookThreeSecondCalculator = (() => {
         if(!priceSides.has(x.price))priceSides.set(x.price,[]);
         priceSides.get(x.price).push({side,at:q===p.old?p.t0:p.t1,shares:x.shares});
       }
-      let ambiguous=0,activeBuy=0,activeSell=0;
-      for(const t of trades){const price=N(t.raw.row.price),appearances=priceSides.get(price),v=N(t.raw.row.volume);if(!appearances){ambiguous+=v;continue;}const side=appearances[0].side;level(side,price).executed_shares+=v;if(side==='ask')activeBuy+=v;else activeSell+=v;}
-      const volume=trades.reduce((n,t)=>n+N(t.raw.row.volume),0);totalVolume+=volume;totalActiveBuy+=activeBuy;totalActiveSell+=activeSell;
+      const bidPrices=[],askPrices=[];for(const p of ps)for(const q of [p.old,p.new]){bidPrices.push(...q.a.bid.map(x=>x.price));askPrices.push(...q.a.ask.map(x=>x.price));}
+      const bestBid=bidPrices.length?Math.max(...bidPrices):NaN,bestAsk=askPrices.length?Math.min(...askPrices):NaN;
+      const observedTradeSides=trades.map(t=>priceSides.get(N(t.raw.row.price))?.[0]?.side).filter(Boolean);
+      const sweepSide=(price)=>{
+        const appearances=priceSides.get(price);if(appearances)return appearances[0].side;
+        if(Number.isFinite(bestAsk)&&price>=bestAsk)return 'ask';
+        if(Number.isFinite(bestBid)&&price<=bestBid)return 'bid';
+        const buy=observedTradeSides.includes('ask'),sell=observedTradeSides.includes('bid');
+        if(buy&&!sell)return 'ask';if(sell&&!buy)return 'bid';
+        return buy?'ask':'bid';
+      };
+      let activeBuy=0,activeSell=0;
+      for(const t of trades){const price=N(t.raw.row.price),side=sweepSide(price),v=N(t.raw.row.volume);if(side==='ask')activeBuy+=v;else activeSell+=v;const appearances=priceSides.get(price);if(appearances)level(side,price).executed_shares+=v;}
+      const volume=trades.reduce((n,t)=>n+N(t.raw.row.volume),0);if(activeBuy+activeSell!==volume){activeSell+=volume-activeBuy-activeSell;}
+      totalVolume+=volume;totalActiveBuy+=activeBuy;totalActiveSell+=activeSell;
       for(const z of levels.values()){
         z.visible_added_shares=z.added_shares;z.added_shares+=Math.max(0,z.executed_shares-z.observed_reduction_shares);z.reduction_shares=z.observed_reduction_shares;z.trade_credit_shares=Math.min(z.observed_reduction_shares,z.executed_shares);z.cancellation_shares=Math.max(0,z.observed_reduction_shares-z.executed_shares);z.net_change_shares=z.added_shares-z.cancellation_shares;z.denominator_trade_shares=volume;finish(z);
         Object.assign(z,{id:`${sid}:${priorUpdate}:${end}:${z.side}:${z.price}`,session_id:sid,interval_start:iso(priorUpdate),interval_end:iso(end),confirmed_at:iso(end),source_span_start:iso(ps[0]?.t0??priorUpdate),source_span_end:iso(ps.at(-1)?.t1??end),status:'trade_update_settled'});reconciliation.push(z);
@@ -968,7 +980,7 @@ const BookThreeSecondCalculator = (() => {
       for(const side of ['bid','ask']){const m=metrics[side];m.denominator_trade_shares=volume;m.baseline_shares=baseline[side];m.active_buy_shares=activeBuy;m.active_sell_shares=activeSell;finish(m);for(const k of ['added_shares','visible_added_shares','observed_reduction_shares','cancellation_shares','trade_credit_shares'])cumulative[side][k]+=m[k];cumulative[side].denominator_trade_shares=totalVolume;cumulative[side].baseline_shares=baseline[side];finish(cumulative[side]);boundaryTotal[side]+=boundary[side];}
       const details=ps.flatMap(p=>p.details),counts={in_five_same_price:0,entered_five:0,left_five:0};for(const d of details)counts[d.visibility_state]++;
       through=Math.max(through,...ps.map(p=>p.t1));
-      const w={start:iso(priorUpdate),end:iso(end),confirmed_at:iso(end),updated_at:iso(end),window_open:false,revisable:false,trade_coverage:'detail_update_received',included_in_cumulative:true,alignment_status:'settled',matched_intervals:ps.map(p=>({start:iso(p.t0),end:iso(p.t1),included:true})),source_span_start:iso(ps[0]?.t0??priorUpdate),source_span_end:iso(ps.at(-1)?.t1??end),sampling_crosses_boundary:false,bid:metrics.bid,ask:metrics.ask,boundary_shares:boundary,sample_pairs:ps.length,source_trade_rows:trades.length,source_trade_records:trades.map(t=>t.raw),source_trade_volume_shares:volume,active_buy_shares:activeBuy,active_sell_shares:activeSell,visibility_details:details,visibility_counts:counts,levels:[...levels.values()],ambiguous_trade_shares:ambiguous,trade_attribution:'unique_observed_price_side_per_detail_update'};
+      const w={start:iso(priorUpdate),end:iso(end),confirmed_at:iso(end),updated_at:iso(end),window_open:false,revisable:false,trade_coverage:'detail_update_received',included_in_cumulative:true,alignment_status:'settled',matched_intervals:ps.map(p=>({start:iso(p.t0),end:iso(p.t1),included:true})),source_span_start:iso(ps[0]?.t0??priorUpdate),source_span_end:iso(ps.at(-1)?.t1??end),sampling_crosses_boundary:false,bid:metrics.bid,ask:metrics.ask,boundary_shares:boundary,sample_pairs:ps.length,source_trade_rows:trades.length,source_trade_records:trades.map(t=>t.raw),source_trade_volume_shares:volume,active_buy_shares:activeBuy,active_sell_shares:activeSell,visibility_details:details,visibility_counts:counts,levels:[...levels.values()],ambiguous_trade_shares:0,trade_attribution:'all_trade_records_classified_by_observed_or_sweep_side'};
       windows.push(w);timeline.push({at:iso(end),through:iso(through),source_trade_volume_shares:totalVolume,bid:{...cumulative.bid},ask:{...cumulative.ask},active_buy_shares:totalActiveBuy,active_sell_shares:totalActiveSell,instant:{start:w.start,end:w.end,bid:w.bid,ask:w.ask,active_buy_shares:activeBuy,active_sell_shares:activeSell},confirmed_intervals:windows.length,excluded_intervals:excluded.length,boundary_shares:{...boundaryTotal}});priorUpdate=end;
     }
     const asOf=Math.max(Number.isFinite(sessionStart)?sessionStart:0,...events.map(e=>e.__t),...ts.map(t=>t.__recv));
