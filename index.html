@@ -22,7 +22,7 @@ main{max-width:1180px;margin:0 auto;padding:28px 20px 60px}.hero{display:flex;ju
 .thsdk-detail-grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:18px;align-items:stretch}.thsdk-trades{position:relative;min-width:0;min-height:0}.thsdk-trades .thsdk-scroll{position:absolute;inset:0;max-height:none}.depth-box{border:1px solid var(--line);border-radius:10px;overflow:hidden}.depth-box h3{font-size:16px;margin:0;padding:12px;background:#f7f9fc}.depth-table{min-width:0;table-layout:fixed}.depth-table th,.depth-table td{padding:7px 10px}.depth-table tr.depth-divider td{border-top:2px solid #cfd8e5}.depth-level-sell{color:var(--green)}.depth-level-buy{color:var(--red)}.depth-status{padding:10px;margin:0;font-size:12px;color:var(--muted)}@media(max-width:780px){.thsdk-detail-grid{grid-template-columns:1fr}.thsdk-trades{position:static}.thsdk-trades .thsdk-scroll{position:static;max-height:420px}.depth-box{max-width:460px;width:100%}}
 </style>
 
-<link rel="stylesheet" href="./ui-parity.css?v=20261026-hide-book-ledger">
+<link rel="stylesheet" href="./ui-parity.css?v=c76137a59e129b67">
 </head>
 <body>
 <main>
@@ -420,7 +420,7 @@ async function loadSelectedChartDay(){
   if(!state.intradayByDate[day]){setStatus(`正在查询 ${day} 的历史分钟线…`);try{const bars=await fetchMinuteBars(state.symbol,'5',day.replaceAll('-',''),day.replaceAll('-',''));const sameDay=bars.filter(p=>p.time.slice(0,10)===day);if(sameDay.length)state.intradayByDate[day]=sameDay;}catch(e){console.warn('历史分钟线不可用',e);setChartDay(day);setStatus(`分钟线加载失败：${e.message}；请稍后重试。`,'error');return;}}
   setChartDay(day);setStatus(state.chart.length?`${day} 的历史分时已加载，共 ${state.chart.length} 个点。`:`${day} 没有可用历史分钟数据；这一天可能超出接口保留范围。`,state.chart.length?'ok':'');
 }
-function setChartDay(day){if(!day||!state.code)return;if(day!==state.chartDate){tickDateBegin(day);clearChartSelection();}state.chartDate=day;$('chartDate').value=day;state.chart=chartDisplayPoints(day,mergePoints(loadChart(state.code,day),state.intradayByDate[day]||[]));drawChart();updateQuoteHeader();tickDateEnd(day);const count=state.chart.length;const isToday=day===dayShanghai();$('chartInfo').textContent=count?`${day}：${isToday?'当日分时（最新实时采样补充尾点）':'历史分时'}，共 ${count} 个点；横轴按真实交易时间定位，午休折叠，缺失点不补造。数据源仅提供近期分钟线；更早日期需提前归档。`:`${day}：未获取到分钟曲线。接口只返回近期交易日数据；更早日期无法从当前公开接口补回。`;}
+function setChartDay(day){if(!day||!state.code)return;if(day!==state.chartDate){tickDateBegin(day);clearChartSelection();}state.chartDate=day;$('chartDate').value=day;state.chart=chartDisplayPoints(day,mergePoints(loadChart(state.code,day),state.intradayByDate[day]||[]));drawChart();updateQuoteHeader();tickDateEnd(day);window.__bookWaveRefresh?.();const count=state.chart.length;const isToday=day===dayShanghai();$('chartInfo').textContent=count?`${day}：${isToday?'当日分时（最新实时采样补充尾点）':'历史分时'}，共 ${count} 个点；横轴按真实交易时间定位，午休折叠，缺失点不补造。数据源仅提供近期分钟线；更早日期需提前归档。`:`${day}：未获取到分钟曲线。接口只返回近期交易日数据；更早日期无法从当前公开接口补回。`;}
 function addPoint(q){if(!q.time||q.time.slice(0,8)!==dayShanghai().replaceAll('-',''))return false;const day=q.time.slice(0,4)+'-'+q.time.slice(4,6)+'-'+q.time.slice(6,8),seconds=q.time.length>=14?q.time.slice(12,14):'00',hands=volumeToHand(q.volume_raw,state.symbol,q.low,q.high,q.amount_wan).hands,amountWan=Number(q.amount_wan),point={time:`${day} ${q.time.slice(8,10)}:${q.time.slice(10,12)}:${seconds}`,price:q.current,volume_hand:hands,amount_wan:Number.isFinite(amountWan)?amountWan:null,amount:Number.isFinite(amountWan)?amountWan*10000:null,isLive:true};state.quote=q;const merged=mergePoints(state.intradayByDate[day]||[],loadChart(state.code,day),[point]);storeChart(state.code,day,merged);if(state.chartDate===day){state.chart=chartDisplayPoints(day,merged);drawChart();updateQuoteHeader();setChartDay(day);}state.quote=q;upsertTodayRow(q);return true;}
 function drawChart(){
   const svg=$('chart');svg.replaceChildren();const pts=state.chart;
@@ -1366,7 +1366,54 @@ const bookRecorder = (() => {
   }
   $('rateResetAll').addEventListener('click', resetAllRates);
   window.addEventListener('storage', e => { if (e.key === DerivedRateReset.key) { for (const c of caches.values()) c.dirty = true; renderStats(); } });
+  // Wave-chart input only: forwards settled calculator windows. It never changes statistics or saved records.
+  const waveMemo = new Map(); let wavePublished = '';
+  function waveSessionFor(c, code, day) {
+    const depthCount = new Map();
+    for (const e of c.events) if (e.kind === 'depth' && e.session_id && beijingDay(e.received_at) === day) depthCount.set(e.session_id, (depthCount.get(e.session_id) || 0) + 1);
+    const seen = new Map();
+    for (const e of c.events) { const s = e.session; if ((e.kind === 'stats_start' || e.kind === 'stats_resume') && s?.id && s.code === code && s.day === day && depthCount.has(s.id) && !seen.has(s.id)) seen.set(s.id, s); }
+    return [...seen.values()].sort((a, b) => depthCount.get(b.id) - depthCount.get(a.id) || Date.parse(a.started_at) - Date.parse(b.started_at))[0] || null;
+  }
+  function waveResultFor(c, session) {
+    const marker = DerivedRateReset.cutoff(session.code, session.day), s = DerivedRateReset.sessionFor(session, marker);
+    let eventCount = 0;
+    for (const e of c.events) if (e.session_id === session.id) eventCount++;
+    const key = JSON.stringify([s.id, s.started_at, eventCount, c.ticks.size]), hit = waveMemo.get(session.id);
+    if (hit?.key === key) return { result: hit.result, session: s };
+    const result = BookThreeSecondCalculator.calculate(c.events, [...c.ticks.values()], s, Infinity);
+    waveMemo.set(session.id, { key, result }); if (waveMemo.size > 6) waveMemo.delete(waveMemo.keys().next().value);
+    return { result, session: s };
+  }
+  function publishBookWaves() {
+    const code = state.code, today = dayShanghai(), day = state.chartDate || today, c = code ? caches.get(code) : null;
+    let session = null, result = null, live = false;
+    if (c && day === today) {
+      const current = sessions.get(code);
+      if (current && current.day === day) {
+        live = true;
+        if (viewTime && wavePublished.startsWith(JSON.stringify([code, day, current.id]).slice(0, -1) + ',')) return;
+        if (!viewTime && !c.dirty && c.cutoff === Infinity && c.result) { result = c.result; session = DerivedRateReset.sessionFor(current, c.rateMarker); }
+        else ({ result, session } = waveResultFor(c, current));
+      }
+    } else if (c) {
+      const past = waveSessionFor(c, code, day);
+      if (past) ({ result, session } = waveResultFor(c, past));
+    }
+    const windows = (result?.windows || []).map(w => ({ start: Date.parse(w.start), end: Date.parse(w.end), spans: (w.matched_intervals || []).map(x => [Date.parse(x.start), Date.parse(x.end)]), volume: w.source_trade_volume_shares, activeBuy: w.active_buy_shares, activeSell: w.active_sell_shares, bidAdded: w.bid?.added_shares, bidCancelled: w.bid?.cancellation_shares, bidNet: w.bid?.net_change_shares, askAdded: w.ask?.added_shares, askCancelled: w.ask?.cancellation_shares, askNet: w.ask?.net_change_shares }));
+    const last = windows.at(-1), key = JSON.stringify([code, day, session?.id || '', session?.started_at || '', windows.length, last?.end || 0, last?.volume || 0]);
+    if (key === wavePublished) return;
+    wavePublished = key;
+    const payload = { code, name: state.name || '', day, today, live, session_id: session?.id || null, started_at: session?.started_at || null, windows };
+    window.__bookWaveData = payload;
+    document.dispatchEvent(new CustomEvent('bookwaves', { detail: payload }));
+  }
   function renderStats() {
+    renderStatsCore();
+    try { publishBookWaves(); } catch (e) { console.warn('波动图数据整理失败', e); }
+  }
+  window.__bookWaveRefresh = () => { const code = state.code; if (!code) return; cacheFor(code).then(() => { if (state.code === code) { try { publishBookWaves(); } catch (e) { console.warn('波动图数据整理失败', e); } } }).catch(() => {}); };
+  function renderStatsCore() {
     const code = state.code, session = sessions.get(code), selected = viewTime;
     const normalized = selected ? normalizeChartTime(selected) : null;
     const cutoff = normalized ? Date.parse(normalized.replace(' ', 'T') + '+08:00') : Date.now();
@@ -1647,6 +1694,6 @@ window.addEventListener('blur',()=>{if(chartGesture)finishChartGesture();else if
 // Tap toggling happens only on pointerup, never on the synthetic click after a swipe.
 </script>
 
-	<script src="./ui-parity.js?v=836dd287cb9704f6"></script>
+	<script src="./ui-parity.js?v=4d099bac5f069f32"></script>
 </body>
 </html>

@@ -145,6 +145,192 @@
     return { fold, foldBody, managementBody };
   }
 
+  // Four detail charts. Reads settled windows published by the page; never recalculates statistics.
+  function buildBookWaves() {
+    const NS = 'http://www.w3.org/2000/svg', W = 400, H = 240, MID = H / 2, Q = H / 4;
+    const RED = '#d93025', GREEN = '#188038', GAP_MS = 15000, ROLL_MS = 60000;
+    const KEYS = ['bidAdded', 'askAdded', 'bidCancelled', 'askCancelled'];
+    const svgEl = (tag, attrs = {}) => { const n = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v); return n; };
+    const minuteOf = t => { const d = new Date(t + 8 * 3600000), m = d.getUTCHours() * 60 + d.getUTCMinutes() + d.getUTCSeconds() / 60 + d.getUTCMilliseconds() / 60000; return m <= 570 ? 0 : m <= 690 ? m - 570 : m < 780 ? 120 : m <= 900 ? m - 660 : 240; };
+    const xOf = t => minuteOf(t) / 240 * W;
+    const clock = t => new Date(t + 8 * 3600000).toISOString().slice(11, 19);
+    const lots = n => Number.isFinite(n) ? (n / 100).toLocaleString('zh-CN', { maximumFractionDigits: 2 }) : '—';
+    const signed = n => Number.isFinite(n) ? (n > 0 ? '+' : n < 0 ? '−' : '') + lots(Math.abs(n)) : '—';
+    const minuteLabel = m => { const total = m < 120 ? 570 + m : 780 + m - 120; return String(Math.floor(total / 60)).padStart(2, '0') + ':' + String(total % 60).padStart(2, '0'); };
+
+    const section = make('section', 'book-wave'); section.id = 'bookWavePanel';
+    const title = make('h3', '', '五档挂单与成交详细图'); title.id = 'bookWaveTitle';
+    section.setAttribute('aria-labelledby', title.id);
+    const status = make('p', 'small book-wave-status', '查询后从开始观测的时刻画起；横轴为北京时间，与上方分时图对齐。');
+    status.id = 'bookWaveStatus'; status.setAttribute('role', 'status');
+    const grid = make('div', 'book-wave-grid');
+    const tip = make('div', 'book-wave-tip'); tip.hidden = true; tip.setAttribute('aria-hidden', 'true');
+    const panels = [['added', '加单详细图'], ['cancelled', '撤单详细图'], ['net', '净加单详细图'], ['active', '主动买卖详细图']].map(([kind, name]) => {
+      const cell = make('div', 'book-wave-cell'); cell.dataset.kind = kind;
+      const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: 'none', role: 'img', 'aria-label': name });
+      svg.append(svgEl('rect', { x: 0, y: 0, width: W, height: H, fill: '#fff' }));
+      if (kind !== 'active') for (const y of [Q, MID + Q]) svg.append(svgEl('line', { class: 'book-wave-start', x1: 0, y1: y, x2: W, y2: y, stroke: '#b8c0cc', 'stroke-width': 1, 'stroke-dasharray': '4 3', 'vector-effect': 'non-scaling-stroke' }));
+      const layer = svgEl('g', { class: 'book-wave-data' });
+      const zero = svgEl('line', { class: 'book-wave-zero', x1: 0, y1: MID, x2: W, y2: MID, stroke: '#111', 'stroke-width': 1.5, 'vector-effect': 'non-scaling-stroke' });
+      const cross = svgEl('line', { class: 'book-wave-cross', x1: 0, y1: 0, x2: 0, y2: H, stroke: '#444', 'stroke-width': 1, 'stroke-dasharray': '4 3', 'vector-effect': 'non-scaling-stroke', display: 'none' });
+      const frame = svgEl('rect', { class: 'book-wave-frame', x: 0, y: 0, width: W, height: H, fill: 'none', stroke: '#111', 'stroke-width': 3, 'vector-effect': 'non-scaling-stroke' });
+      svg.append(layer, zero, cross, frame);
+      const ticks = make('div', 'book-wave-ticks');
+      for (const [pct, label] of [[0, '09:30'], [25, '10:30'], [50, '11:30/13:00'], [75, '14:00'], [100, '15:00']]) { const span = make('span', '', label); span.style.left = pct + '%'; ticks.append(span); }
+      cell.append(svg, ticks, make('div', 'book-wave-name', name)); grid.append(cell);
+      return { kind, cell, svg, layer, cross };
+    });
+    grid.append(tip);
+    const legend = make('p', 'small book-wave-legend');
+    const swatch = (color, dashed) => { const s = make('span', 'book-wave-swatch'); s.style.background = dashed ? 'repeating-linear-gradient(90deg,#b8c0cc 0 4px,transparent 4px 7px)' : color; return s; };
+    legend.append(swatch(RED), '红线＝买盘（黑线上方）　', swatch(GREEN), '绿线＝卖盘（黑线下方）　', swatch('', true), '浅灰虚线＝起点。',
+      make('br'), '加单、撤单图：线在起点上方＝近1分钟比开始观测以来的平均多，下方＝比平均少；净加单图：从开始观测累计（加单−撤单）；主动买卖图：每根柱为1分钟，红柱＝主动买入，绿柱＝主动卖出。滑动图表查看该时刻详情。');
+    section.append(title, status, grid, legend);
+
+    let model = { pts: [], real: [], bars: null, t0: null }, latest = null, drawQueued = false, active = null, lastHover = null;
+    function build(data) {
+      const rows = (data?.windows || []).filter(w => Number.isFinite(w.end)).sort((a, b) => a.end - b.end);
+      if (!rows.length) return { pts: [], real: [], bars: null, t0: null };
+      const firstSpan = (rows[0].spans || []).filter(s => Number.isFinite(s[0])).sort((a, b) => a[0] - b[0])[0];
+      const t0 = firstSpan ? firstSpan[0] : Number.isFinite(rows[0].start) ? rows[0].start : rows[0].end;
+      const zeroDev = Object.fromEntries(KEYS.map(k => [k, 0]));
+      const pts = [{ t: t0, dev: zeroDev, net: { bid: 0, ask: 0 } }], real = [], parts = [];
+      const cum = { obs: 0, bidNet: 0, askNet: 0, activeBuy: 0, activeSell: 0, volume: 0, ...zeroDev }, win = { obs: 0, ...zeroDev };
+      let covered = t0, j = 0;
+      const bars = { buy: new Float64Array(240), sell: new Float64Array(240), has: new Uint8Array(240) };
+      rows.forEach((w, i) => {
+        const spans = (w.spans || []).filter(s => Number.isFinite(s[0]) && Number.isFinite(s[1]) && s[1] >= s[0]).sort((a, b) => a[0] - b[0]);
+        let observed = 0, gapEnd = null;
+        for (const [a, b] of spans.length ? spans : [[w.end, w.end]]) {
+          if (a - covered > GAP_MS) { if (gapEnd === null) gapEnd = a; observed += b - a; } else observed += Math.max(0, b - covered);
+          covered = Math.max(covered, b);
+        }
+        const amount = Object.fromEntries(KEYS.map(k => [k, Number(w[k]) || 0]));
+        parts.push({ observed, amount });
+        cum.obs += observed; win.obs += observed;
+        for (const k of KEYS) { cum[k] += amount[k]; win[k] += amount[k]; }
+        while (j < i && win.obs - parts[j].observed >= ROLL_MS) { win.obs -= parts[j].observed; for (const k of KEYS) win[k] -= parts[j].amount[k]; j++; }
+        const rate = {}, avg = {}, dev = {};
+        for (const k of KEYS) { rate[k] = win[k] / Math.max(win.obs, 1000) * ROLL_MS; avg[k] = cum[k] / Math.max(cum.obs, 1000) * ROLL_MS; dev[k] = j === 0 ? 0 : rate[k] - avg[k]; }
+        cum.bidNet += Number(w.bidNet) || 0; cum.askNet += Number(w.askNet) || 0;
+        cum.activeBuy += Number(w.activeBuy) || 0; cum.activeSell += Number(w.activeSell) || 0; cum.volume += Number(w.volume) || 0;
+        const prev = pts[pts.length - 1];
+        if (gapEnd !== null) pts.push({ t: gapEnd, dev: prev.dev, net: prev.net, hold: true });
+        const point = { t: w.end, w, dev, rate, avg, net: { bid: cum.bidNet, ask: cum.askNet }, cum: { activeBuy: cum.activeBuy, activeSell: cum.activeSell, volume: cum.volume } };
+        pts.push(point); real.push(point);
+        const m = Math.min(239, Math.max(0, Math.ceil(minuteOf(w.end)) - 1));
+        bars.buy[m] += Number(w.activeBuy) || 0; bars.sell[m] += Number(w.activeSell) || 0; bars.has[m] = 1;
+      });
+      return { pts, real, bars, t0 };
+    }
+    function pathFor(pts, value, center, range) {
+      let d = '', bucket = null, group = [];
+      const flush = () => {
+        if (!group.length) return;
+        let lo = group[0], hi = group[0];
+        for (const p of group) { if (p.y < lo.y) lo = p; if (p.y > hi.y) hi = p; }
+        for (const p of [...new Set([group[0], lo, hi, group[group.length - 1]])].sort((a, b) => a.i - b.i)) d += (d ? 'L' : 'M') + p.x.toFixed(2) + ' ' + p.y.toFixed(2);
+        group = [];
+      };
+      pts.forEach((p, i) => { const v = value(p); if (!Number.isFinite(v)) return; const x = xOf(p.t), b = Math.round(x * 2); if (b !== bucket) { flush(); bucket = b; } group.push({ x, y: center - v / range * Q, i }); });
+      flush(); return d;
+    }
+    function drawLines(panel, bidValue, askValue) {
+      let max = 0;
+      for (const p of model.pts) max = Math.max(max, Math.abs(bidValue(p)), Math.abs(askValue(p)));
+      // The range only grows when a new extreme appears; earlier lines then shrink proportionally.
+      const range = Math.max(1, max * 1.12), nodes = [];
+      for (const [value, center, color, side] of [[bidValue, Q, RED, 'bid'], [askValue, MID + Q, GREEN, 'ask']]) {
+        const d = model.pts.length ? pathFor(model.pts, value, center, range) : '';
+        if (d) nodes.push(svgEl('path', { d, fill: 'none', stroke: color, 'stroke-width': 1.5, 'stroke-linejoin': 'round', 'vector-effect': 'non-scaling-stroke', 'data-side': side }));
+      }
+      panel.layer.replaceChildren(...nodes);
+    }
+    function drawBars(panel) {
+      const nodes = [], b = model.bars;
+      if (b) {
+        let max = 0;
+        for (let m = 0; m < 240; m++) max = Math.max(max, b.buy[m], b.sell[m]);
+        const top = Math.max(1, max / 0.9), bw = W / 240;
+        for (let m = 0; m < 240; m++) {
+          if (!b.has[m]) continue;
+          for (const [v, color, kind] of [[b.buy[m], RED, 'buy'], [b.sell[m], GREEN, 'sell']].filter(x => x[0] > 0).sort((x, y) => y[0] - x[0])) {
+            const h = v / top * (MID - 2);
+            nodes.push(svgEl('rect', { x: (m * bw + 0.15).toFixed(2), y: (MID - h).toFixed(2), width: (bw * 0.82).toFixed(2), height: h.toFixed(2), fill: color, 'data-kind': kind }));
+          }
+        }
+      }
+      panel.layer.replaceChildren(...nodes);
+    }
+    function setStatus(data) {
+      if (!data?.code) { status.textContent = '查询后从开始观测的时刻画起；横轴为北京时间，与上方分时图对齐。'; return; }
+      const n = model.real.length;
+      if (!n) {
+        status.textContent = data.day === data.today ? `${data.day}：暂无已结算的观测记录。交易时段保持页面打开即从开始观测的时刻画起；也可在上方切换到本机有记录的交易日查看。` : `${data.day}：本机没有这一天的观测记录，无法画图，不用其他日期代替。`;
+        return;
+      }
+      status.textContent = `${data.day}｜${clock(model.t0)}（北京时间）开始观测｜已结算 ${n.toLocaleString('zh-CN')} 次成交更新｜未观测时段画平线｜${data.live ? '随记录实时更新' : '本机历史记录'}`;
+    }
+    function draw() {
+      drawQueued = false;
+      model = build(latest);
+      drawLines(panels[0], p => p.dev.bidAdded, p => p.dev.askAdded);
+      drawLines(panels[1], p => p.dev.bidCancelled, p => p.dev.askCancelled);
+      drawLines(panels[2], p => p.net.bid, p => p.net.ask);
+      drawBars(panels[3]);
+      setStatus(latest);
+      section.dataset.points = String(model.real.length);
+      if (lastHover && !tip.hidden) show(lastHover.index, lastHover.frac, lastHover.fingerX); else hide();
+    }
+    function schedule(data) { latest = data; if (!drawQueued) { drawQueued = true; requestAnimationFrame(draw); } }
+
+    function nearest(x) {
+      const real = model.real; if (!real.length) return null;
+      let lo = 0, hi = real.length - 1;
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (xOf(real[mid].t) < x) lo = mid + 1; else hi = mid; }
+      if (lo > 0 && Math.abs(xOf(real[lo - 1].t) - x) <= Math.abs(xOf(real[lo].t) - x)) lo--;
+      return real[lo];
+    }
+    function hide() { tip.hidden = true; for (const p of panels) p.cross.setAttribute('display', 'none'); }
+    function show(index, frac, fingerX) {
+      const p = nearest(frac * W); if (!p) { hide(); return; }
+      lastHover = { index, frac, fingerX };
+      const x = xOf(p.t).toFixed(2);
+      for (const panel of panels) { panel.cross.setAttribute('x1', x); panel.cross.setAttribute('x2', x); panel.cross.removeAttribute('display'); }
+      const w = p.w, m = Math.min(239, Math.max(0, Math.ceil(minuteOf(p.t)) - 1)), b = model.bars;
+      const lines = [
+        `${clock(p.t)}（北京时间）· 本次成交 ${lots(w.volume)} 手`,
+        `主动买入 ${lots(w.activeBuy)} 手 · 主动卖出 ${lots(w.activeSell)} 手`,
+        `买盘：加单 ${lots(w.bidAdded)} · 撤单 ${lots(w.bidCancelled)} · 净加单 ${signed(w.bidNet)}`,
+        `卖盘：加单 ${lots(w.askAdded)} · 撤单 ${lots(w.askCancelled)} · 净加单 ${signed(w.askNet)}`,
+        `近1分钟/平均（手/分钟）：买加 ${lots(p.rate.bidAdded)}/${lots(p.avg.bidAdded)} · 买撤 ${lots(p.rate.bidCancelled)}/${lots(p.avg.bidCancelled)}`,
+        `卖加 ${lots(p.rate.askAdded)}/${lots(p.avg.askAdded)} · 卖撤 ${lots(p.rate.askCancelled)}/${lots(p.avg.askCancelled)}`,
+        `${minuteLabel(m)} 这1分钟：主动买入 ${lots(b.buy[m])} · 主动卖出 ${lots(b.sell[m])}`,
+        `累计：买盘净加单 ${signed(p.net.bid)} · 卖盘净加单 ${signed(p.net.ask)} · 主动买入 ${lots(p.cum.activeBuy)} · 主动卖出 ${lots(p.cum.activeSell)}`
+      ];
+      tip.replaceChildren(...lines.map(text => make('div', '', text)));
+      tip.hidden = false;
+      // Show details over the other chart row so the chart under the finger stays visible.
+      const cell = panels[index < 2 ? 2 : 0].cell, gridWidth = grid.clientWidth, tipWidth = tip.offsetWidth;
+      tip.style.top = (cell.offsetTop + 4) + 'px';
+      tip.style.left = Math.max(0, fingerX < gridWidth / 2 ? Math.min(gridWidth - tipWidth, fingerX + 18) : fingerX - tipWidth - 18) + 'px';
+    }
+    panels.forEach((panel, index) => {
+      const locate = event => {
+        const rect = panel.svg.getBoundingClientRect(), gridRect = grid.getBoundingClientRect();
+        if (!rect.width) return;
+        show(index, Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)), event.clientX - gridRect.left);
+      };
+      panel.svg.addEventListener('pointerdown', event => { active = panel.svg; if (event.pointerType !== 'mouse') { try { panel.svg.setPointerCapture(event.pointerId); } catch { /* optional */ } } locate(event); });
+      panel.svg.addEventListener('pointermove', event => { if (event.pointerType === 'mouse' || active === panel.svg) locate(event); });
+      for (const type of ['pointerup', 'pointercancel']) panel.svg.addEventListener(type, event => { if (event.pointerType !== 'mouse') { active = null; lastHover = null; hide(); } });
+      panel.svg.addEventListener('pointerleave', event => { if (event.pointerType === 'mouse') { active = null; lastHover = null; hide(); } });
+    });
+    document.addEventListener('bookwaves', event => schedule(event.detail));
+    schedule(window.__bookWaveData || null);
+    return section;
+  }
+
   function arrange() {
     const flow = byId('bookFlowPanel');
     const three = byId('bookThreeSecondPanel');
@@ -233,7 +419,7 @@
     const at = byId('bookFlowAt'), volume = byId('bookFlowVolume');
     const instant = byId('bookFlowInstant'), coverage = byId('bookFlowCoverage');
     flow.removeAttribute('style'); flow.className = 'book-comparison';
-    flow.replaceChildren(make('h2', 'book-comparison-title', '五档加单与撤单'), at, volume, metricsGrid, instant, coverage);
+    flow.replaceChildren(make('h2', 'book-comparison-title', '五档加单与撤单'), at, volume, metricsGrid, instant, coverage, buildBookWaves());
 
     const records = make('section', 'card');
     records.id = 'bookRecordsPanel';
