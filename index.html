@@ -897,7 +897,7 @@ const BookThreeSecondCalculator = (() => {
     return { a, valid };
   }
 
-  const empty = () => ({ added_shares: 0, visible_added_shares: 0, replenishment_shares: 0, executed_shares: 0, observed_reduction_shares: 0, reduction_shares: 0, cancellation_shares: 0, net_change_shares: 0, denominator_trade_shares: 0, addition_rate_pct: null, reduction_rate_pct: null, rate_pct: null, trade_credit_shares: 0, unexplained_shares: 0, unknown_shares: 0, baseline_shares: 0 });
+  const empty = () => ({ added_shares: 0, visible_added_shares: 0, replenishment_shares: 0, executed_shares: 0, quote_depth_matched_shares: 0, unresolved_trade_shares: 0, observed_reduction_shares: 0, reduction_shares: 0, cancellation_shares: 0, net_change_shares: 0, denominator_trade_shares: 0, addition_rate_pct: null, reduction_rate_pct: null, rate_pct: null, trade_credit_shares: 0, unexplained_shares: 0, unknown_shares: 0, baseline_shares: 0 });
   const finish = m => { const d = m.denominator_trade_shares; m.addition_rate_pct = d > 0 ? m.added_shares / d * 100 : null; m.reduction_rate_pct = d > 0 ? m.cancellation_shares / d * 100 : null; m.rate_pct = m.reduction_rate_pct; m.unexplained_shares = m.cancellation_shares; m.unknown_shares = m.cancellation_shares; m.reduction_shares = m.cancellation_shares; m.net_change_shares = m.added_shares - m.cancellation_shares; m.net_addition_rate_pct = d > 0 ? m.net_change_shares / d * 100 : null; return m; };
   function coverage(r, t0, t1, d) { const b = r.payload_metadata?.bounds || {}, rt = ms(r.received_at); if (!Number.isFinite(rt) || rt < t1) return false; if (b.mode === 'available-day') return b.day === d; if (b.mode === 'minute') { const lo = local(b.start), hi = local(b.end); return Number.isFinite(lo) && Number.isFinite(hi) && lo <= t0 && hi >= t1; } return false; }
 
@@ -926,15 +926,15 @@ const BookThreeSecondCalculator = (() => {
           for (const price of new Set([...oldByPrice.keys(), ...newByPrice.keys()])) {
             const before = oldByPrice.get(price), after = newByPrice.get(price);
             if (!before || !after || before.side === after.side) continue;
-            const sw = { id: `${sid}:${p.t0}:${p.t1}:switch:${price}`, price, from_side: before.side, to_side: after.side, before_shares: before.row.shares, after_shares: after.row.shares, interval_start: iso(p.t0), interval_end: iso(p.t1), visibility_state: 'side_changed', visibility_label: `同一价位由${before.side === 'bid' ? '买盘' : '卖盘'}转到${after.side === 'bid' ? '买盘' : '卖盘'}；两侧边界挂量未知，不推断加单或撤单`, statistics_eligible: false };
+            const sw = { id: `${sid}:${p.t0}:${p.t1}:switch:${price}`, price, from_side: before.side, to_side: after.side, before_shares: before.row.shares, after_shares: after.row.shares, interval_start: iso(p.t0), interval_end: iso(p.t1), visibility_state: 'side_changed', visibility_label: `同一价位由${before.side === 'bid' ? '买盘' : '卖盘'}转到${after.side === 'bid' ? '买盘' : '卖盘'}；两侧边界挂量未知，不推断加单或撤单`, statistics_eligible: true };
             switched.set(price, sw); p.side_switches.push(sw); sideSwitches.push(sw);
           }
           for (const side of ['bid', 'ask']) {
             const before = new Map(prev.q.a[side].map(x => [x.price, x])), after = new Map(q.a[side].map(x => [x.price, x]));
             for (const price of new Set([...before.keys(), ...after.keys()])) {
-              const b = before.get(price), a = after.get(price), delta = b && a ? a.shares - b.shares : null;
+              const b = before.get(price), a = after.get(price), sw = switched.get(price), delta = b && a ? a.shares - b.shares : b && sw ? -b.shares : a && sw ? a.shares : null;
               if (b && a && delta === 0) continue;
-              const stateName = b && a ? 'in_five_same_price' : a ? 'entered_five' : 'left_five', sw = switched.get(price);
+              const stateName = b && a ? 'in_five_same_price' : a ? 'entered_five' : 'left_five';
               const description = sw ? `${sw.visibility_label}；本侧进出边界变化未知` : stateName === 'in_five_same_price' ? '同价位仍在五档内' : a ? '进入五档（之前挂量未知）' : '移出五档（外部余量未知）';
               const d = { id: `${sid}:${p.t0}:${p.t1}:${side}:${price}`, side, price, before_shares: b ? b.shares : null, after_shares: a ? a.shares : null, delta_shares: delta, before_level: b ? b.level : null, after_level: a ? a.level : null, visibility_state: stateName, visibility_label: description, side_switch_id: sw?.id || null, switched_to: sw?.to_side || null, switched_from: sw?.from_side || null, interval_start: iso(p.t0), interval_end: iso(p.t1), source_span_start: iso(p.t0), source_span_end: iso(p.t1), confirmed_at: iso(p.t1), statistics_eligible: false, observations: [{ received_at: iso(p.t1), before_shares: b ? b.shares : null, after_shares: a ? a.shares : null, delta_shares: delta }] };
               p.details.push(d); visibilityChanges.push(d);
@@ -968,18 +968,63 @@ const BookThreeSecondCalculator = (() => {
       if (!state || !state.valid) return { reason: 'no_valid_snapshot' };
       if (state.ph !== tradePhase || tradeAt - state.at > gapLimit(state.e)) return { reason: 'stale_or_wrong_phase_snapshot', snapshot_at: state.at };
       const sides = ['bid', 'ask'].filter(side => state.q.a[side].some(x => x.price === price));
-      if (sides.length === 1) return { side: sides[0], snapshot_at: state.at };
+      if (sides.length === 1) { const quoteSide = sides[0], row = state.q.a[quoteSide].find(x => x.price === price); return { quote_side: quoteSide, visible_shares: row?.shares ?? null, snapshot_at: state.at }; }
       if (sides.length > 1) return { reason: 'ambiguous_snapshot', snapshot_at: state.at };
       return { reason: 'outside_top_five', snapshot_at: state.at };
     }
 
-    const cumulative = { bid: empty(), ask: empty() }, timeline = [], windows = [], reconciliation = [];
+    // Replay only visible capacity at the exact traded price. A fresh snapshot with
+    // unchanged size does not refill a spent quote; only an observed increase does.
+    const tradeEvidence = new Map(), capacityByQuote = new Map(), pairByEnd = new Map(pairs.map(p => [p.t1, p]));
+    const replay = [...bookTimeline.map(state => ({ kind: 'depth', at: state.at, state })), ...ts.map(t => ({ kind: 'trade', at: t.__trade, trade: t }))]
+      .sort((a, b) => a.at - b.at || (a.kind === b.kind ? (a.trade?.__i ?? 0) - (b.trade?.__i ?? 0) : a.kind === 'depth' ? -1 : 1));
+    let capacityState = null;
+    for (const item of replay) {
+      if (item.kind === 'depth') {
+        const current = item.state;
+        if (!current.valid) { capacityByQuote.clear(); capacityState = null; continue; }
+        const pair = pairByEnd.get(current.at), continuous = !!(capacityState && pair && pair.t0 === capacityState.at);
+        const visible = new Map();
+        for (const side of ['bid', 'ask']) for (const row of current.q.a[side]) {
+          const key = `${side}:${row.price}`; visible.set(key, row.shares);
+          if (continuous && capacityByQuote.has(key) && capacityState.q.a[side].some(x => x.price === row.price)) {
+            const before = capacityState.q.a[side].find(x => x.price === row.price).shares, delta = row.shares - before, pool = capacityByQuote.get(key);
+            capacityByQuote.set(key, delta > 0 ? pool + delta : delta < 0 ? Math.min(pool, row.shares) : pool);
+          } else capacityByQuote.set(key, row.shares);
+        }
+        for (const key of [...capacityByQuote.keys()]) if (!visible.has(key)) capacityByQuote.delete(key);
+        capacityState = current;
+        continue;
+      }
+      const t = item.trade, price = N(t.raw.row.price), volume = N(t.raw.row.volume), match = sideAtTradeTime(t.__trade, price);
+      if (!match.quote_side) { tradeEvidence.set(t, { quote_side: null, visible_shares: null, matched_shares: 0, unresolved_shares: 0 }); continue; }
+      const key = `${match.quote_side}:${price}`, available = Math.max(0, capacityByQuote.get(key) ?? match.visible_shares ?? 0), matched = Math.min(volume, available);
+      capacityByQuote.set(key, available - matched);
+      tradeEvidence.set(t, { quote_side: match.quote_side, visible_shares: match.visible_shares, matched_shares: matched, unresolved_shares: volume - matched, snapshot_at: match.snapshot_at });
+    }
+
+    // A later same-price side switch contributes its newly visible remainder once,
+    // separately from trade volume and order additions/cancellations.
+    const switchFlowCredits = new Map(), creditedTrades = new Set();
+    for (const sw of pairs.flatMap(p => p.side_switches).sort((a, b) => ms(a.interval_end) - ms(b.interval_end))) {
+      const switchAt = ms(sw.interval_end), remaining = N(sw.after_shares);
+      if (!Number.isFinite(remaining) || remaining <= 0) continue;
+      const candidate = ts.filter(t => !creditedTrades.has(t) && N(t.raw.row.price) === sw.price && t.__trade <= switchAt && tradeEvidence.get(t)?.quote_side === sw.from_side)
+        .sort((a, b) => a.__trade - b.__trade || a.__recv - b.__recv || a.__i - b.__i).at(-1);
+      if (!candidate) continue;
+      creditedTrades.add(candidate);
+      const credit = switchFlowCredits.get(candidate.__recv) || { buy: 0, sell: 0 };
+      credit[sw.from_side === 'bid' ? 'sell' : 'buy'] += remaining;
+      switchFlowCredits.set(candidate.__recv, credit);
+    }
+
+    const cumulative = { bid: empty(), ask: empty() }, activeFlowCumulative = { buy_shares: 0, sell_shares: 0, buy_trade_shares: 0, sell_trade_shares: 0, buy_post_switch_visible_shares: 0, sell_post_switch_visible_shares: 0 }, timeline = [], windows = [], reconciliation = [];
     let totalVolume = 0, orderBookTotal = 0, pairIndex = 0, priorUpdate = Number.isFinite(sessionStart) ? sessionStart : (events[0]?.__t || ts[0]?.__recv || Date.now()), through = priorUpdate;
     const boundaryTotal = { bid: 0, ask: 0 }, exclusionTotals = { outside_top_five: 0, no_valid_snapshot: 0, stale_or_wrong_phase_snapshot: 0, ambiguous_snapshot: 0, outside_session: 0 };
     for (const [end, trades] of [...updates].sort((a, b) => a[0] - b[0])) {
       const ps = []; while (pairIndex < pairs.length && pairs[pairIndex].t1 <= end) ps.push(pairs[pairIndex++]);
       const levels = new Map(), metrics = { bid: empty(), ask: empty() }, boundary = { bid: 0, ask: 0 };
-      const level = (side, price) => { const key = side + ':' + price; if (!levels.has(key)) levels.set(key, { side, price, added_shares: 0, visible_added_shares: 0, replenishment_shares: 0, observed_reduction_shares: 0, reduction_shares: 0, cancellation_shares: 0, trade_credit_shares: 0, executed_shares: 0, net_change_shares: 0, observations: [] }); return levels.get(key); };
+      const level = (side, price) => { const key = side + ':' + price; if (!levels.has(key)) levels.set(key, { side, price, added_shares: 0, visible_added_shares: 0, replenishment_shares: 0, observed_reduction_shares: 0, reduction_shares: 0, cancellation_shares: 0, trade_credit_shares: 0, executed_shares: 0, quote_depth_matched_shares: 0, unresolved_trade_shares: 0, net_change_shares: 0, observations: [] }); return levels.get(key); };
       for (const p of ps) {
         for (const side of ['bid', 'ask']) for (const x of [...p.old.a[side], ...p.new.a[side]]) level(side, x.price);
         for (const d of p.details) {
@@ -990,14 +1035,22 @@ const BookThreeSecondCalculator = (() => {
         }
       }
       let eligibleVolume = 0, excludedUpdateVolume = 0, ambiguousUpdateVolume = 0;
-      const classification = [];
+      const classification = [], activeFlow = { buy_shares: 0, sell_shares: 0, buy_trade_shares: 0, sell_trade_shares: 0, buy_post_switch_visible_shares: 0, sell_post_switch_visible_shares: 0, basis: 'observed_quote_side_estimate_not_aggressor', aggressor_direction_available: false };
       for (const t of trades) {
-        const price = N(t.raw.row.price), volume = N(t.raw.row.volume), match = sideAtTradeTime(t.__trade, price);
-        const item = { id: t.raw.id ?? null, price, volume_shares: volume, trade_at: iso(t.__trade), side: match.side || null, snapshot_at: Number.isFinite(match.snapshot_at) ? iso(match.snapshot_at) : null, excluded_reason: match.reason || null, aggressor_side: null };
+        const price = N(t.raw.row.price), volume = N(t.raw.row.volume), match = sideAtTradeTime(t.__trade, price), evidence = tradeEvidence.get(t) || { matched_shares: 0, unresolved_shares: 0 };
+        const item = { id: t.raw.id ?? null, price, volume_shares: volume, trade_at: iso(t.__trade), quote_side: match.quote_side || null, active_side_estimate: match.quote_side === 'ask' ? 'buy' : match.quote_side === 'bid' ? 'sell' : null, snapshot_at: Number.isFinite(match.snapshot_at) ? iso(match.snapshot_at) : null, visible_quote_shares: match.visible_shares ?? null, quote_depth_matched_shares: evidence.matched_shares, unresolved_trade_shares: evidence.unresolved_shares, excluded_reason: match.reason || null, aggressor_side: null, deal_type_direction_recognized: false };
         classification.push(item);
-        if (match.side) { level(match.side, price).executed_shares += volume; eligibleVolume += volume; }
+        if (match.quote_side) {
+          const z = level(match.quote_side, price); z.executed_shares += volume; z.quote_depth_matched_shares += evidence.matched_shares; z.unresolved_trade_shares += evidence.unresolved_shares;
+          eligibleVolume += volume;
+          if (match.quote_side === 'ask') { activeFlow.buy_shares += volume; activeFlow.buy_trade_shares += volume; }
+          else { activeFlow.sell_shares += volume; activeFlow.sell_trade_shares += volume; }
+        }
         else { excludedUpdateVolume += volume; exclusionTotals[match.reason] = (exclusionTotals[match.reason] || 0) + volume; if (match.reason === 'ambiguous_snapshot') ambiguousUpdateVolume += volume; }
       }
+      const switchCredit = switchFlowCredits.get(end) || { buy: 0, sell: 0 };
+      activeFlow.buy_post_switch_visible_shares = switchCredit.buy; activeFlow.sell_post_switch_visible_shares = switchCredit.sell;
+      activeFlow.buy_shares += switchCredit.buy; activeFlow.sell_shares += switchCredit.sell;
       const volume = trades.reduce((n, t) => n + N(t.raw.row.volume), 0); totalVolume += volume; orderBookTotal += eligibleVolume;
       for (const z of levels.values()) {
         z.visible_added_shares = z.added_shares;
@@ -1010,23 +1063,24 @@ const BookThreeSecondCalculator = (() => {
         z.denominator_trade_shares = eligibleVolume; finish(z);
         Object.assign(z, { id: `${sid}:${priorUpdate}:${end}:${z.side}:${z.price}`, session_id: sid, interval_start: iso(priorUpdate), interval_end: iso(end), confirmed_at: iso(end), source_span_start: iso(ps[0]?.t0 ?? priorUpdate), source_span_end: iso(ps.at(-1)?.t1 ?? end), status: 'trade_update_settled' });
         reconciliation.push(z);
-        for (const k of ['added_shares', 'visible_added_shares', 'replenishment_shares', 'executed_shares', 'observed_reduction_shares', 'cancellation_shares', 'trade_credit_shares']) metrics[z.side][k] += z[k];
+        for (const k of ['added_shares', 'visible_added_shares', 'replenishment_shares', 'executed_shares', 'quote_depth_matched_shares', 'unresolved_trade_shares', 'observed_reduction_shares', 'cancellation_shares', 'trade_credit_shares']) metrics[z.side][k] += z[k];
       }
       for (const side of ['bid', 'ask']) {
         const m = metrics[side]; m.denominator_trade_shares = eligibleVolume; m.baseline_shares = baseline[side]; finish(m);
-        for (const k of ['added_shares', 'visible_added_shares', 'replenishment_shares', 'executed_shares', 'observed_reduction_shares', 'cancellation_shares', 'trade_credit_shares']) cumulative[side][k] += m[k];
+        for (const k of ['added_shares', 'visible_added_shares', 'replenishment_shares', 'executed_shares', 'quote_depth_matched_shares', 'unresolved_trade_shares', 'observed_reduction_shares', 'cancellation_shares', 'trade_credit_shares']) cumulative[side][k] += m[k];
         cumulative[side].denominator_trade_shares = orderBookTotal; cumulative[side].baseline_shares = baseline[side]; finish(cumulative[side]); boundaryTotal[side] += boundary[side];
       }
       const details = ps.flatMap(p => p.details), switches = ps.flatMap(p => p.side_switches), counts = { in_five_same_price: 0, entered_five: 0, left_five: 0 };
       for (const d of details) counts[d.visibility_state]++;
+      for (const key of ['buy_shares', 'sell_shares', 'buy_trade_shares', 'sell_trade_shares', 'buy_post_switch_visible_shares', 'sell_post_switch_visible_shares']) activeFlowCumulative[key] += activeFlow[key];
       through = Math.max(through, ...ps.map(p => p.t1));
-      const w = { start: iso(priorUpdate), end: iso(end), confirmed_at: iso(end), updated_at: iso(end), window_open: false, revisable: false, trade_coverage: 'detail_update_received', included_in_cumulative: true, alignment_status: 'settled', matched_intervals: ps.map(p => ({ start: iso(p.t0), end: iso(p.t1), included: true })), source_span_start: iso(ps[0]?.t0 ?? priorUpdate), source_span_end: iso(ps.at(-1)?.t1 ?? end), sampling_crosses_boundary: false, bid: metrics.bid, ask: metrics.ask, boundary_shares: boundary, sample_pairs: ps.length, source_trade_rows: trades.length, source_trade_records: trades.map(t => t.raw), source_trade_volume_shares: volume, order_book_trade_volume_shares: eligibleVolume, excluded_trade_volume_shares: excludedUpdateVolume, trade_classifications: classification, visibility_details: details, side_switches: switches, side_switch_count: switches.length, visibility_counts: counts, levels: [...levels.values()], ambiguous_trade_shares: ambiguousUpdateVolume, trade_attribution: 'latest_valid_top_five_side_at_or_before_trade_time', trade_side_semantics: 'observed_quote_side_not_aggressor', aggressor_direction_available: false };
+      const w = { start: iso(priorUpdate), end: iso(end), confirmed_at: iso(end), updated_at: iso(end), window_open: false, revisable: false, trade_coverage: 'detail_update_received', included_in_cumulative: true, alignment_status: 'settled', matched_intervals: ps.map(p => ({ start: iso(p.t0), end: iso(p.t1), included: true })), source_span_start: iso(ps[0]?.t0 ?? priorUpdate), source_span_end: iso(ps.at(-1)?.t1 ?? end), sampling_crosses_boundary: false, bid: metrics.bid, ask: metrics.ask, active_flow: activeFlow, boundary_shares: boundary, sample_pairs: ps.length, source_trade_rows: trades.length, source_trade_records: trades.map(t => t.raw), source_trade_volume_shares: volume, order_book_trade_volume_shares: eligibleVolume, excluded_trade_volume_shares: excludedUpdateVolume, trade_classifications: classification, visibility_details: details, side_switches: switches, side_switch_count: switches.length, visibility_counts: counts, levels: [...levels.values()], ambiguous_trade_shares: ambiguousUpdateVolume, trade_attribution: 'latest_valid_top_five_side_at_or_before_trade_time', trade_side_semantics: 'observed_quote_side_not_aggressor', aggressor_direction_available: false };
       windows.push(w);
-      timeline.push({ at: iso(end), through: iso(through), source_trade_volume_shares: totalVolume, order_book_trade_volume_shares: orderBookTotal, excluded_trade_volume_shares: totalVolume - orderBookTotal, bid: { ...cumulative.bid }, ask: { ...cumulative.ask }, instant: { start: w.start, end: w.end, bid: w.bid, ask: w.ask }, confirmed_intervals: windows.length, excluded_intervals: excluded.length, boundary_shares: { ...boundaryTotal } });
+      timeline.push({ at: iso(end), through: iso(through), source_trade_volume_shares: totalVolume, order_book_trade_volume_shares: orderBookTotal, excluded_trade_volume_shares: totalVolume - orderBookTotal, bid: { ...cumulative.bid }, ask: { ...cumulative.ask }, active_flow: { ...activeFlowCumulative, basis: 'observed_quote_side_estimate_not_aggressor', aggressor_direction_available: false }, instant: { start: w.start, end: w.end, bid: w.bid, ask: w.ask, active_flow: w.active_flow }, confirmed_intervals: windows.length, excluded_intervals: excluded.length, boundary_shares: { ...boundaryTotal } });
       priorUpdate = end;
     }
     const asOf = Math.max(Number.isFinite(sessionStart) ? sessionStart : 0, ...events.map(e => e.__t), ...ts.map(t => t.__recv));
-    return { as_of: iso(asOf), calculation_mode: 'trade_update_cumulative', source_trade_volume_shares: totalVolume, order_book_trade_volume_shares: orderBookTotal, excluded_trade_volume_shares: totalVolume - orderBookTotal, excluded_trade_volume_by_reason: exclusionTotals, trade_attribution: 'latest_valid_top_five_side_at_or_before_trade_time', trade_side_semantics: 'observed_quote_side_not_aggressor', aggressor_direction_available: false, timeline, windows, reconciliation, visibility_changes: visibilityChanges, side_switches: sideSwitches, snapshots: depths.length, pending_intervals: pairs.length - pairIndex, pending_changes: visibilityChanges.filter(d => !d.statistics_eligible && d.delta_shares !== null), matched_intervals_count: pairIndex, candidate_intervals: pairs.length, incomplete_intervals: 0, excluded_intervals: excluded.length, last_depth_at: lastDepth === null ? null : iso(lastDepth), session_started_at: s.started_at || null };
+    return { as_of: iso(asOf), calculation_mode: 'trade_update_cumulative', source_trade_volume_shares: totalVolume, order_book_trade_volume_shares: orderBookTotal, excluded_trade_volume_shares: totalVolume - orderBookTotal, excluded_trade_volume_by_reason: exclusionTotals, active_flow: { ...activeFlowCumulative, basis: 'observed_quote_side_estimate_not_aggressor', aggressor_direction_available: false }, trade_attribution: 'latest_valid_top_five_side_at_or_before_trade_time', trade_side_semantics: 'observed_quote_side_not_aggressor', aggressor_direction_available: false, timeline, windows, reconciliation, visibility_changes: visibilityChanges, side_switches: sideSwitches, snapshots: depths.length, pending_intervals: pairs.length - pairIndex, pending_changes: visibilityChanges.filter(d => !d.statistics_eligible && d.delta_shares !== null), matched_intervals_count: pairIndex, candidate_intervals: pairs.length, incomplete_intervals: 0, excluded_intervals: excluded.length, last_depth_at: lastDepth === null ? null : iso(lastDepth), session_started_at: s.started_at || null };
   }
   return { calculate };
 })();
@@ -1084,7 +1138,7 @@ const BookStatisticsAudit = (() => {
       if (!state || !state.valid) return { reason: 'no_valid_snapshot' };
       if (phase(state.at) !== tradePhase || tradeAt - state.at > gapLimit(state.event)) return { reason: 'stale_or_wrong_phase_snapshot', snapshot_at: state.at };
       const sides = ['bid', 'ask'].filter(s => state[s].has(price) && Number.isFinite(state[s].get(price)));
-      if (sides.length === 1) return { side: sides[0], snapshot_at: state.at };
+      if (sides.length === 1) { const quoteSide = sides[0]; return { quote_side: quoteSide, visible_shares: state[quoteSide].get(price), snapshot_at: state.at }; }
       if (sides.length > 1) return { reason: 'ambiguous_snapshot', snapshot_at: state.at };
       return { reason: 'outside_top_five', snapshot_at: state.at };
     }
@@ -1093,14 +1147,30 @@ const BookStatisticsAudit = (() => {
       for (let j = 1; j < depth.length; j++) if (depth[j].at > lo && depth[j].at <= hi && depth[j - 1].at <= hi) {
         const cur = depth[j], old = depth[j - 1], curEvent = cur.event, oldEvent = old.event, gap = cur.at - old.at;
         if (!cur.valid || !old.valid || curEvent.segment_id !== oldEvent.segment_id || gap <= 0 || gap > gapLimit(curEvent) || curEvent.gap_warning || !phase(cur.at) || phase(cur.at) !== phase(old.at) || events.some(e => e.kind === 'feed_error' && e.feed === 'depth' && e.__recv > old.at && e.__recv <= cur.at)) continue;
-        const by = { bid: new Map(), ask: new Map() };
-        for (const side of ['bid', 'ask']) for (const [p, b] of old[side]) if (cur[side].has(p)) { const a = cur[side].get(p); if (!Number.isFinite(b) || !Number.isFinite(a)) continue; const d = a - b; if (d) by[side].set(p, d); }
-        pairs.push({ start: iso(old.at), end: iso(cur.at), start_ms: old.at, end_ms: cur.at, by, old, cur });
+        const by = { bid: new Map(), ask: new Map() }, oldByPrice = new Map(), newByPrice = new Map(), switches = [];
+        for (const side of ['bid', 'ask']) { for (const [p, v] of old[side]) oldByPrice.set(p, { side, shares: v }); for (const [p, v] of cur[side]) newByPrice.set(p, { side, shares: v }); }
+        for (const p of new Set([...oldByPrice.keys(), ...newByPrice.keys()])) {
+          const b = oldByPrice.get(p), a = newByPrice.get(p);
+          if (b && a && b.side === a.side) { const d = a.shares - b.shares; if (d) by[b.side].set(p, d); }
+          else if (b && a) { by[b.side].set(p, -b.shares); by[a.side].set(p, a.shares); switches.push({ price: p, from_side: b.side, to_side: a.side, before_shares: b.shares, after_shares: a.shares, at: cur.at }); }
+        }
+        pairs.push({ start: iso(old.at), end: iso(cur.at), start_ms: old.at, end_ms: cur.at, by, old, cur, switches });
       }
       return pairs;
     };
+    const auditHorizon = Number.isFinite(asOf) ? asOf : Math.max(start || 0, ...events.map(e => e.__recv), ...ti.map(x => x.recv));
+    const allPairsForFlow = pairsFor(Number.isFinite(start) ? start - 1 : (depth[0]?.at ?? 0) - 1, auditHorizon), switchFlowCreditsByRecv = new Map(), creditedFlowTrades = new Set();
+    for (const sw of allPairsForFlow.flatMap(p => p.switches).sort((a, b) => a.at - b.at)) {
+      const candidate = ti.filter(x => !creditedFlowTrades.has(x) && x.price === sw.price && x.trade <= sw.at && sideAtTradeTime(x.trade, x.price).quote_side === sw.from_side)
+        .sort((a, b) => a.trade - b.trade || a.recv - b.recv || a.i - b.i).at(-1);
+      if (!candidate || !(sw.after_shares > 0)) continue;
+      creditedFlowTrades.add(candidate);
+      const credit = switchFlowCreditsByRecv.get(candidate.recv) || { buy: 0, sell: 0 };
+      credit[sw.from_side === 'bid' ? 'sell' : 'buy'] += sw.after_shares; switchFlowCreditsByRecv.set(candidate.recv, credit);
+    }
     const windows = []; let prev = Number.isFinite(start) ? start : (uts.length ? uts[0] : NaN);
     const cumulative = { bid: { added_shares: 0, cancellation_shares: 0, executed_shares: 0, replenishment_shares: 0, denominator_trade_shares: 0 }, ask: { added_shares: 0, cancellation_shares: 0, executed_shares: 0, replenishment_shares: 0, denominator_trade_shares: 0 }, source: 0, eligible: 0 };
+    const cumulativeActiveFlow = { buy_shares: 0, sell_shares: 0, buy_trade_shares: 0, sell_trade_shares: 0, buy_post_switch_visible_shares: 0, sell_post_switch_visible_shares: 0 };
     for (const end of uts) {
       const source = sourceAt(end), pairs = pairsFor(prev, end), levels = { bid: new Map(), ask: new Map() };
       for (const p of pairs) for (const side of ['bid', 'ask']) for (const [price, d] of p.by[side]) {
@@ -1109,14 +1179,19 @@ const BookStatisticsAudit = (() => {
         z.observations.push({ start: p.start, end: p.end, delta: d }); levels[side].set(price, z);
       }
       let eligibleVolume = 0;
-      const tradeClassifications = [];
+      const tradeClassifications = [], activeFlow = { buy_shares: 0, sell_shares: 0, buy_trade_shares: 0, sell_trade_shares: 0, buy_post_switch_visible_shares: 0, sell_post_switch_visible_shares: 0, basis: 'observed_quote_side_estimate_not_aggressor', aggressor_direction_available: false };
       for (const x of source) {
         const match = sideAtTradeTime(x.trade, x.price);
-        tradeClassifications.push({ trade: x, side: match.side || null, reason: match.reason || null });
-        if (!match.side) continue;
-        const z = levels[match.side].get(x.price) || { side: match.side, price: x.price, visible_added_shares: 0, observed_reduction_shares: 0, executed_shares: 0, replenishment_shares: 0, trade_credit_shares: 0, added_shares: 0, cancellation_shares: 0, net_change_shares: 0, observations: [] };
-        z.executed_shares += x.vol; levels[match.side].set(x.price, z); eligibleVolume += x.vol;
+        tradeClassifications.push({ trade: x, quote_side: match.quote_side || null, active_side_estimate: match.quote_side === 'ask' ? 'buy' : match.quote_side === 'bid' ? 'sell' : null, visible_quote_shares: match.visible_shares ?? null, reason: match.reason || null, aggressor_side: null });
+        if (!match.quote_side) continue;
+        const z = levels[match.quote_side].get(x.price) || { side: match.quote_side, price: x.price, visible_added_shares: 0, observed_reduction_shares: 0, executed_shares: 0, replenishment_shares: 0, trade_credit_shares: 0, added_shares: 0, cancellation_shares: 0, net_change_shares: 0, observations: [] };
+        z.executed_shares += x.vol; levels[match.quote_side].set(x.price, z); eligibleVolume += x.vol;
+        if (match.quote_side === 'ask') { activeFlow.buy_shares += x.vol; activeFlow.buy_trade_shares += x.vol; }
+        else { activeFlow.sell_shares += x.vol; activeFlow.sell_trade_shares += x.vol; }
       }
+      const switchCredit = switchFlowCreditsByRecv.get(end) || { buy: 0, sell: 0 };
+      activeFlow.buy_post_switch_visible_shares = switchCredit.buy; activeFlow.sell_post_switch_visible_shares = switchCredit.sell;
+      activeFlow.buy_shares += switchCredit.buy; activeFlow.sell_shares += switchCredit.sell;
       const volume = source.reduce((n, x) => n + x.vol, 0), sideOut = {};
       for (const side of ['bid', 'ask']) {
         const q = { added_shares: 0, visible_added_shares: 0, replenishment_shares: 0, observed_reduction_shares: 0, executed_shares: 0, cancellation_shares: 0, trade_credit_shares: 0, net_change_shares: 0, denominator_trade_shares: eligibleVolume, levels: [] };
@@ -1131,7 +1206,7 @@ const BookStatisticsAudit = (() => {
         });
         sideOut[side] = q;
       }
-      const eligibleRecords = tradeClassifications.filter(x => x.side), excludedVolume = volume - eligibleVolume;
+      const eligibleRecords = tradeClassifications.filter(x => x.quote_side), excludedVolume = volume - eligibleVolume;
       const supplied = (result.windows || []).find(w => time(w.end) === end) || (result.windows || [])[windows.length];
       const issues = [];
       for (const p of pairs) if (p.cur.event.changes) {
@@ -1142,12 +1217,13 @@ const BookStatisticsAudit = (() => {
       }
       const delta = { bid_added_shares: 0, bid_reduced_shares: 0, bid_executed_shares: 0, ask_added_shares: 0, ask_reduced_shares: 0, ask_executed_shares: 0, source_trade_volume_shares: 0, order_book_trade_volume_shares: 0, excluded_trade_volume_shares: 0 };
       if (supplied) {
-        const checks = [['source_trade_volume_shares', supplied.source_trade_volume_shares, volume], ['order_book_trade_volume_shares', supplied.order_book_trade_volume_shares, eligibleVolume], ['excluded_trade_volume_shares', supplied.excluded_trade_volume_shares, excludedVolume]];
+        const checks = [['source_trade_volume_shares', supplied.source_trade_volume_shares, volume], ['order_book_trade_volume_shares', supplied.order_book_trade_volume_shares, eligibleVolume], ['excluded_trade_volume_shares', supplied.excluded_trade_volume_shares, excludedVolume], ['active_flow.buy_shares', supplied.active_flow?.buy_shares, activeFlow.buy_shares], ['active_flow.sell_shares', supplied.active_flow?.sell_shares, activeFlow.sell_shares]];
         for (const side of ['bid', 'ask']) for (const [field, expected] of [['added_shares', sideOut[side].added_shares], ['cancellation_shares', sideOut[side].cancellation_shares], ['executed_shares', sideOut[side].executed_shares], ['replenishment_shares', sideOut[side].replenishment_shares], ['denominator_trade_shares', eligibleVolume]]) checks.push([`${side}.${field}`, supplied[side]?.[field], expected]);
         for (const [key, actual, expected] of checks) if (actual != null && (!Number.isFinite(num(actual)) || num(actual) !== expected)) issues.push(key);
         if (Array.isArray(supplied.source_trade_records) && supplied.source_trade_records.length !== source.length) issues.push('source_trade_records');
       }
       const suppliedTimeline = result.timeline?.[windows.length], cumulativeDelta = {};
+      for (const key of ['buy_shares', 'sell_shares', 'buy_trade_shares', 'sell_trade_shares', 'buy_post_switch_visible_shares', 'sell_post_switch_visible_shares']) cumulativeActiveFlow[key] += activeFlow[key];
       for (const side of ['bid', 'ask']) {
         for (const k of ['added_shares', 'cancellation_shares', 'executed_shares', 'replenishment_shares']) cumulative[side][k] += sideOut[side][k];
         cumulative[side].denominator_trade_shares += eligibleVolume;
@@ -1172,7 +1248,8 @@ const BookStatisticsAudit = (() => {
       cumulativeDelta.order_book_trade_volume_shares = (suppliedTimeline?.order_book_trade_volume_shares ?? cumulative.eligible) - cumulative.eligible;
       cumulativeDelta.excluded_trade_volume_shares = (suppliedTimeline?.excluded_trade_volume_shares ?? (cumulative.source - cumulative.eligible)) - (cumulative.source - cumulative.eligible);
       if (cumulativeDelta.source_trade_volume_shares || cumulativeDelta.order_book_trade_volume_shares || cumulativeDelta.excluded_trade_volume_shares) issues.push('cumulative_trade_volume');
-      const calc = { start: iso(prev), end: iso(end), confirmed_at: iso(end), status: 'pass', raw_snapshot_count: pairs.length ? pairs.length + 1 : 0, raw_comparisons: pairs.length, raw: { bid: sideOut.bid, ask: sideOut.ask, source_trade_records: source.map(x => x.raw), source_trade_volume_shares: volume, order_book_trade_volume_shares: eligibleVolume, excluded_trade_volume_shares: excludedVolume, trade_classifications: tradeClassifications }, delta, cumulative_delta: cumulativeDelta, matched_intervals: pairs.map(p => ({ start: p.start, end: p.end, included: true })), source_trade_records: source.map(x => x.raw), levels: sideOut, issues };
+      if (suppliedTimeline?.active_flow) for (const key of ['buy_shares', 'sell_shares']) { const actual = suppliedTimeline.active_flow[key]; cumulativeDelta['active_flow.' + key] = actual == null ? 0 : actual - cumulativeActiveFlow[key]; if (cumulativeDelta['active_flow.' + key]) issues.push('active_flow_cumulative_' + key); }
+      const calc = { start: iso(prev), end: iso(end), confirmed_at: iso(end), status: 'pass', raw_snapshot_count: pairs.length ? pairs.length + 1 : 0, raw_comparisons: pairs.length, raw: { bid: sideOut.bid, ask: sideOut.ask, source_trade_records: source.map(x => x.raw), source_trade_volume_shares: volume, order_book_trade_volume_shares: eligibleVolume, excluded_trade_volume_shares: excludedVolume, trade_classifications: tradeClassifications }, active_flow: activeFlow, delta, cumulative_delta: cumulativeDelta, matched_intervals: pairs.map(p => ({ start: p.start, end: p.end, included: true })), source_trade_records: source.map(x => x.raw), levels: sideOut, issues };
       calc.status = issues.length ? 'mismatch' : (pairs.length || source.length ? 'pass' : 'incomplete');
       windows.push(calc); prev = end;
     }
@@ -1307,7 +1384,7 @@ const bookRecorder = (() => {
   panel.after(ledgerBox);
   $('bookStatsCSV').after($('bookLedgerCSV'));
   const threePanel=document.createElement('section');threePanel.id='bookThreeSecondPanel';threePanel.style.cssText='margin:12px 0;padding:12px;border:1px solid #c9dfd3;border-radius:9px;background:#f7fcf9;line-height:1.8';
-  threePanel.innerHTML=`<h3 style="margin:0">实时汇总：逐档增减，按成交明细更新结算</h3><p id="bookAdditionAt" class="small"></p><p id="bookThreeSource" class="small" style="font-weight:600"></p><div style="display:flex;gap:12px 24px;flex-wrap:wrap"><div style="flex:1;min-width:230px"><strong id="bookBidAddition">买盘累计加单率：—</strong><div id="bookBidAdditionDetail" class="small"></div></div><div style="flex:1;min-width:230px"><strong id="bookAskAddition">卖盘累计加单率：—</strong><div id="bookAskAdditionDetail" class="small"></div></div></div><p class="hint">每档累加每次正负变化；成交更新结算：加单＝观察增加＋max(0，该档成交－观察减少)，撤单＝max(0，观察减少－该档成交)，净加单＝加单－撤单，可为负。每次更新全部五档都统计，无成交按0；逐档算完再合计。共同分母为观察期全部去重成交，含五档外。更新时间不固定；尚未结算的变化仍完整记录。分母为0不显示百分比。</p><button id="bookThreeCSV" class="secondary" type="button">导出全部成交更新区间 CSV</button><p id="bookThreeSummary" class="small"></p><div class="table-wrap" style="max-height:360px"><table style="min-width:1450px"><thead><tr><th>成交更新区间（北京）</th><th>共同成交量（手，仅一份）</th><th>买盘加单（手）</th><th>买盘撤单（手）</th><th>买盘净加单（手）</th><th>买盘加单率</th><th>买盘撤单率</th><th>买盘净加单率</th><th>卖盘加单（手）</th><th>卖盘撤单（手）</th><th>卖盘净加单（手）</th><th>卖盘加单率</th><th>卖盘撤单率</th><th>卖盘净加单率</th><th>五档可见状态（变动项数）</th><th>采样说明</th><th>各档计算明细</th></tr></thead><tbody id="bookThreeRows"></tbody></table></div>`;
+  threePanel.innerHTML=`<h3 style="margin:0">实时汇总：逐档增减，按成交明细更新结算</h3><p id="bookAdditionAt" class="small"></p><p id="bookThreeSource" class="small" style="font-weight:600"></p><div style="display:flex;gap:12px 24px;flex-wrap:wrap"><div style="flex:1;min-width:230px"><strong id="bookBidAddition">买盘累计加单率：—</strong><div id="bookBidAdditionDetail" class="small"></div><div id="bookActiveBuy" class="small" title="按成交时可见五档价位侧及同价位后续盘口变化推算；上游未提供可确认主动方向字段，不等同真实主动买入。">主动买入（盘口推算）：—</div></div><div style="flex:1;min-width:230px"><strong id="bookAskAddition">卖盘累计加单率：—</strong><div id="bookAskAdditionDetail" class="small"></div><div id="bookActiveSell" class="small" title="按成交时可见五档价位侧及同价位后续盘口变化推算；上游未提供可确认主动方向字段，不等同真实主动卖出。">主动卖出（盘口推算）：—</div></div></div><p class="hint">每档累加每次正负变化；成交更新结算：加单＝观察增加＋max(0，该档成交－观察减少)，撤单＝max(0，观察减少－该档成交)，净加单＝加单－撤单，可为负。每次更新全部五档都统计，无成交按0；逐档算完再合计。共同分母为观察期全部去重成交，含五档外。更新时间不固定；尚未结算的变化仍完整记录。分母为0不显示百分比。</p><button id="bookThreeCSV" class="secondary" type="button">导出全部成交更新区间 CSV</button><p id="bookThreeSummary" class="small"></p><div class="table-wrap" style="max-height:360px"><table style="min-width:1450px"><thead><tr><th>成交更新区间（北京）</th><th>共同成交量（手，仅一份）</th><th>买盘加单（手）</th><th>买盘撤单（手）</th><th>买盘净加单（手）</th><th>买盘加单率</th><th>买盘撤单率</th><th>买盘净加单率</th><th>卖盘加单（手）</th><th>卖盘撤单（手）</th><th>卖盘净加单（手）</th><th>卖盘加单率</th><th>卖盘撤单率</th><th>卖盘净加单率</th><th>五档可见状态（变动项数）</th><th>采样说明</th><th>各档计算明细</th></tr></thead><tbody id="bookThreeRows"></tbody></table></div>`;
   panel.after(threePanel);
   const auditPanel=document.createElement('details');auditPanel.id='bookAuditPanel';auditPanel.style.cssText='margin:12px 0;padding:12px;border:1px solid #cbd8e7;border-radius:9px;background:#fbfcff;line-height:1.8';
   auditPanel.innerHTML=`<summary style="cursor:pointer;font-size:1.17em;font-weight:700">上下数量核对：实时快照 ↔ 成交更新汇总（点击展开/收起）</summary><p class="small">从下方保存的原始快照重新按同侧、同价格及相同成交更新区间计算，再核对上方窗口增减量、成交分母和累计值；同时检查原始变化行是否与快照相符。进入、移出五档不推断加撤，原始缺失值不改。差额＝上方统计−原始重算；0表示该项数量一致。</p><p id="bookAuditStatus" role="status" style="font-weight:600">等待可比较的盘口快照。</p><p id="bookAuditCumulative" class="small"></p><div class="table-wrap" style="max-height:320px"><table style="min-width:1080px"><thead><tr><th>成交更新区间（北京）</th><th>核对状态</th><th>原始快照数 / 比较次数</th><th>买增加差（手）</th><th>买减少差（手）</th><th>卖增加差（手）</th><th>卖减少差（手）</th><th>成交量差（手）</th><th>核对说明</th></tr></thead><tbody id="bookAuditRows"></tbody></table></div><p class="hint">每次响应后核对当前已结算的成交更新区间，一致不代表源数据完整；仅核对可观测数量，不是交易所逐委托订单核销；资料不足、待确认或排除的时段不会冒充“核对一致”。滑动趋势图按选点之前已收到的数据重新核对。全部核对结果随原始记录JSON导出。</p>`;
@@ -1324,9 +1401,11 @@ const bookRecorder = (() => {
   function renderThreeSecond(result,cutoff,snapshot=null,clear=false){
     const entries=clear?[]:(result?.windows||[]).filter(w=>Date.parse(w.confirmed_at)<=cutoff);
     $('bookAdditionAt').textContent=snapshot?`${viewTime?'截至所选时刻':'最新累计'}｜盘口已更新至 ${tickSourceTime(snapshot.through)}。`:'等待可比较的盘口快照。';
-    const volume=snapshot?.bid?.denominator_trade_shares;
+    const volume=snapshot?.bid?.denominator_trade_shares,activeFlow=snapshot?.active_flow;
     const volumeText=snapshot?`共同成交量：${fmtLots(volume)} 手（观察期全部去重成交，含五档内外，每笔只计一次）`:'共同成交量：等待成交明细更新结算；盘口每次变化均已独立记录。';
     $('bookThreeSource').textContent=volumeText;$('bookFlowVolume').textContent=volumeText;
+    $('bookActiveBuy').textContent=`主动买入（盘口推算）：${activeFlow?fmtLots(activeFlow.buy_shares):'—'}${activeFlow?' 手':''}`;
+    $('bookActiveSell').textContent=`主动卖出（盘口推算）：${activeFlow?fmtLots(activeFlow.sell_shares):'—'}${activeFlow?' 手':''}`;
     for(const [side,suffix,label]of[['bid','Bid','买盘'],['ask','Ask','卖盘']]){const m=snapshot?.[side];$('book'+suffix+'Addition').textContent=`${label}累计加单率：${fmtTradeRate(m?.addition_rate_pct,m?.denominator_trade_shares)}`;$('book'+suffix+'AdditionDetail').textContent=m?`加单 ${fmtLots(m.added_shares)} 手；撤单 ${fmtLots(m.cancellation_shares)} 手；观察减少 ${fmtLots(m.observed_reduction_shares)} 手；净加单 ${fmtLots(m.net_change_shares)} 手；净加单率 ${fmtTradeRate(m.net_addition_rate_pct,m.denominator_trade_shares)}；共同成交分母 ${fmtLots(m.denominator_trade_shares)} 手。`:'';}
     $('bookThreeSummary').textContent=`已结算 ${entries.length} 次成交更新，买盘、卖盘分别显示全部 ${entries.length} 次，最新在前，可在表内上下滚动查看。待下次成交更新结算 ${result?.pending_intervals||0} 次。各行数量和比率均为该次更新区间值；共同成交量在两框中重复列示用于对照，不相加。全部记录仍可导出。`;
     const visible=[...entries].reverse(),key=JSON.stringify([sessions.get(state.code)?.id,visible]);if(!clear&&key===threeRenderKey)return;threeRenderKey=key;
