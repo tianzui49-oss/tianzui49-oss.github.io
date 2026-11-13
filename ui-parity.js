@@ -190,7 +190,7 @@
       const source = byId('bookFlow' + suffix + 'Detail');
       const activeSource = byId('bookFlow' + suffix + 'Active');
       const additionSource = byId('book' + suffix + 'AdditionDetail');
-      dataBridge.append(source, additionSource, activeSource);
+      dataBridge.append(...[source, additionSource, activeSource].filter(Boolean));
       const dl = make('dl', 'book-side-fields');
       const cells = [];
       for (const [key, labelText, pattern] of fields) {

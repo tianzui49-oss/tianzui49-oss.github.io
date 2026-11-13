@@ -1226,7 +1226,7 @@ const bookRecorder = (() => {
     const volumeText=snapshot?`共同成交量：${fmtLots(volume)} 手（观察期全部去重成交，含五档内外，每笔只计一次）`:'共同成交量：等待成交明细更新结算；盘口每次变化均已独立记录。';
     $('bookThreeSource').textContent=volumeText;$('bookFlowVolume').textContent=volumeText;
     for(const [side,suffix,label]of[['bid','Bid','买盘'],['ask','Ask','卖盘']]){const m=snapshot?.[side];$('book'+suffix+'Addition').textContent=`${label}累计加单率：${fmtTradeRate(m?.addition_rate_pct,m?.denominator_trade_shares)}`;$('book'+suffix+'AdditionDetail').textContent=m?`加单 ${fmtLots(m.added_shares)} 手；撤单 ${fmtLots(m.cancellation_shares)} 手；观察减少 ${fmtLots(m.observed_reduction_shares)} 手；净加单 ${fmtLots(m.net_change_shares)} 手；净加单率 ${fmtTradeRate(m.net_addition_rate_pct,m.denominator_trade_shares)}；共同成交分母 ${fmtLots(m.denominator_trade_shares)} 手。`:'';}
-    $('bookFlowBidActive').textContent=snapshot?`主动买入（手）：${fmtLots(snapshot.active_buy_shares)}`:'主动买入（手）：—';$('bookFlowAskActive').textContent=snapshot?`主动卖出（手）：${fmtLots(snapshot.active_sell_shares)}`:'主动卖出（手）：—';
+    const activeBidNode=$('bookFlowBidActive'), activeAskNode=$('bookFlowAskActive'); if(activeBidNode) activeBidNode.textContent=snapshot?`主动买入（手）：${fmtLots(snapshot.active_buy_shares)}`:'主动买入（手）：—'; if(activeAskNode) activeAskNode.textContent=snapshot?`主动卖出（手）：${fmtLots(snapshot.active_sell_shares)}`:'主动卖出（手）：—';
     $('bookThreeSummary').textContent=`已结算 ${entries.length} 次成交更新，买盘、卖盘分别显示全部 ${entries.length} 次，最新在前，可在表内上下滚动查看。待下次成交更新结算 ${result?.pending_intervals||0} 次。各行数量和比率均为该次更新区间值；共同成交量在两框中重复列示用于对照，不相加。全部记录仍可导出。`;
     const visible=[...entries].reverse(),key=JSON.stringify([sessions.get(state.code)?.id,visible]);if(!clear&&key===threeRenderKey)return;threeRenderKey=key;
     $('bookThreeRows').replaceChildren(...visible.map(w=>{
@@ -1337,7 +1337,7 @@ const bookRecorder = (() => {
     const result = recompute(code, false, selected ? cutoff : Infinity);
     const noData = message => {
       $('bookFlowAt').textContent = message;
-      $('bookFlowBid').textContent = '买盘累计撤单率：—'; $('bookFlowAsk').textContent = '卖盘累计撤单率：—'; $('bookFlowBidActive').textContent='主动买入（手）：—'; $('bookFlowAskActive').textContent='主动卖出（手）：—';
+      $('bookFlowBid').textContent = '买盘累计撤单率：—'; $('bookFlowAsk').textContent = '卖盘累计撤单率：—'; const activeBidNode=$('bookFlowBidActive'), activeAskNode=$('bookFlowAskActive'); if(activeBidNode) activeBidNode.textContent='主动买入（手）：—'; if(activeAskNode) activeAskNode.textContent='主动卖出（手）：—';
       for (const id of ['bookFlowBidDetail', 'bookFlowAskDetail', 'bookFlowInstant', 'bookFlowCoverage']) $(id).textContent = '';
       renderLedger(null,cutoff,true);
       renderThreeSecond(null,cutoff,null,true);
