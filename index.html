@@ -938,10 +938,10 @@ const BookThreeSecondCalculator = (() => {
     const cumulative={bid:empty(),ask:empty()},timeline=[],windows=[],reconciliation=[];let totalVolume=0,totalActiveBuy=0,totalActiveSell=0,pairIndex=0,priorUpdate=Number.isFinite(sessionStart)?sessionStart:(events[0]?.__t||ts[0]?.__recv||Date.now()),through=priorUpdate;const boundaryTotal={bid:0,ask:0};
     for(const [end,trades] of [...updates].sort((a,b)=>a[0]-b[0])){
       const ps=[];while(pairIndex<pairs.length&&pairs[pairIndex].t1<=end)ps.push(pairs[pairIndex++]);
-      const levels=new Map(),metrics={bid:empty(),ask:empty()},boundary={bid:0,ask:0};
+      const levels=new Map(),metrics={bid:empty(),ask:empty()},boundary={bid:0,ask:0},tradePrices=new Set(trades.filter(t=>N(t.raw.row.volume)>0).map(t=>N(t.raw.row.price)));
       const level=(side,price)=>{const key=side+':'+price;if(!levels.has(key))levels.set(key,{side,price,added_shares:0,visible_added_shares:0,observed_reduction_shares:0,reduction_shares:0,cancellation_shares:0,trade_credit_shares:0,executed_shares:0,net_change_shares:0,observations:[]});return levels.get(key);};
       for(const p of ps){for(const side of ['bid','ask'])for(const x of [...p.old.a[side],...p.new.a[side]])level(side,x.price);
-        for(const d of p.details){if(d.delta_shares===null){boundary[d.side]+=d.before_shares??d.after_shares;continue;}d.statistics_eligible=true;const z=level(d.side,d.price);z.added_shares+=Math.max(0,d.delta_shares);z.observed_reduction_shares+=Math.max(0,-d.delta_shares);z.observations.push(...d.observations);if(z.before_shares==null)z.before_shares=d.before_shares;z.after_shares=d.after_shares;}
+        for(const d of p.details){if(d.delta_shares===null){const remains=p.new.a.bid.some(x=>x.price===d.price)||p.new.a.ask.some(x=>x.price===d.price);if(d.visibility_state==='left_five'&&!remains&&tradePrices.has(d.price)){d.statistics_eligible=true;const z=level(d.side,d.price);z.observed_reduction_shares+=d.before_shares??0;z.observations.push(...d.observations);if(z.before_shares==null)z.before_shares=d.before_shares;z.after_shares=d.after_shares;}else boundary[d.side]+=d.before_shares??d.after_shares;continue;}d.statistics_eligible=true;const z=level(d.side,d.price);z.added_shares+=Math.max(0,d.delta_shares);z.observed_reduction_shares+=Math.max(0,-d.delta_shares);z.observations.push(...d.observations);if(z.before_shares==null)z.before_shares=d.before_shares;z.after_shares=d.after_shares;}
         for(const price of new Set([...p.old.a.bid,...p.old.a.ask,...p.new.a.bid,...p.new.a.ask].map(x=>x.price))){
           const oldBid=p.old.a.bid.find(x=>x.price===price),oldAsk=p.old.a.ask.find(x=>x.price===price),newBid=p.new.a.bid.find(x=>x.price===price),newAsk=p.new.a.ask.find(x=>x.price===price);
           if(oldBid&&!newBid&&newAsk){const z=level('bid',price);z.observed_reduction_shares+=oldBid.shares;const add=level('ask',price);add.added_shares+=newAsk.shares;}
@@ -1060,6 +1060,11 @@ const BookStatisticsAudit = (() => {
         const oldBid=p.old.bid.get(price),oldAsk=p.old.ask.get(price),newBid=p.cur.bid.get(price),newAsk=p.cur.ask.get(price);
         if(Number.isFinite(oldBid)&&!Number.isFinite(newBid)&&Number.isFinite(newAsk)){const z=levels.bid.get(price)||{side:'bid',price,A:0,R:0,T:0,net:0,observations:[]};z.R+=oldBid;levels.bid.set(price,z);const add=levels.ask.get(price)||{side:'ask',price,A:0,R:0,T:0,net:0,observations:[]};add.A+=newAsk;levels.ask.set(price,add);}
         if(Number.isFinite(oldAsk)&&!Number.isFinite(newAsk)&&Number.isFinite(newBid)){const z=levels.ask.get(price)||{side:'ask',price,A:0,R:0,T:0,net:0,observations:[]};z.R+=oldAsk;levels.ask.set(price,z);const add=levels.bid.get(price)||{side:'bid',price,A:0,R:0,T:0,net:0,observations:[]};add.A+=newBid;levels.bid.set(price,add);}
+      }
+      const tradePrices=new Set(source.filter(x=>x.vol>0).map(x=>x.price)), settledGone=new Set();
+      for(const p of pairs) for(const side of ['bid','ask']) for(const [price,oldShares] of p.old[side]) {
+        if(!tradePrices.has(price)||settledGone.has(side+':'+price)||p.cur.bid.has(price)||p.cur.ask.has(price))continue;
+        const z=levels[side].get(price)||{side,price,A:0,R:0,T:0,net:0,observations:[]};z.R+=oldShares;levels[side].set(price,z);settledGone.add(side+':'+price);
       }
       // Match the production rule: retain the original side across a
       // cross-side move; the opposite-side visible quantity is a new
