@@ -85,14 +85,14 @@ main{max-width:1180px;margin:0 auto;padding:28px 20px 60px}.hero{display:flex;ju
 
     <section class="card" id="thsdkTicks" aria-labelledby="thsdkTitle">
       <div class="section-head" style="flex-wrap:wrap"><div style="display:flex;align-items:baseline;gap:6px 12px;flex-wrap:wrap"><h2 id="thsdkTitle">成交明细</h2><span class="small" id="thsdkLoadedSummary" aria-live="polite" aria-atomic="true" title="直接显示接口返回的累计成交笔数（transaction_count），随刷新更新；缺失时保留同一股票同日最近有效返回值，不以记录行数或成交手数代替。">累计成交 —笔</span></div><span class="small" id="thsdkStockLabel">跟随上方查询股票</span></div>
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px"><span id="thsdkMode" class="small">默认显示最新可用成交，选点查看对应时刻。</span><button class="secondary" id="tickLatestBtn" type="button">返回最新</button></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px"><span id="thsdkMode" class="small">显示所选交易日全天可用成交，选点不缩小成交范围。</span><button class="secondary" id="tickLatestBtn" type="button">返回最新</button></div>
       <p id="thsdkStatus" class="thsdk-meta" role="status">查询后显示最新可用成交。</p>
       <div id="thsdkRowStats" class="thsdk-meta" aria-live="polite" aria-atomic="true" style="padding:10px 12px;border:1px solid var(--line);border-radius:8px;line-height:1.9">成交记录统计：待加载。</div>
       <div class="thsdk-detail-grid">
         <div class="thsdk-trades"><div class="table-wrap thsdk-scroll" id="thsdkTableWrap" hidden><table class="thsdk-table"><thead id="thsdkTickHead"></thead><tbody id="thsdkTickBody"></tbody></table></div></div>
         <aside class="depth-box" aria-label="最新可用五档，与历史成交独立"><h3>买卖五档</h3><div style="padding:9px 10px;border-bottom:1px solid var(--line)"><button class="secondary" id="depthReadOnce" type="button" title="仅向源接口读取一次最新可用五档，不开启自动刷新">刷新五档</button></div><table class="depth-table"><thead><tr><th>档位</th><th>委托价格</th><th>委托量（手）</th></tr></thead><tbody id="thsdkDepthBody"></tbody></table><p class="depth-status" id="thsdkDepthStatus">查询后自动显示最新可用五档；交易时段随页面刷新，休市保留最后有效数据。</p></aside>
       </div>
-      <p class="thsdk-note">时间均为北京时间。默认显示最新可用数据，交易时段自动刷新；休市不轮询，首次进入最新视图自动读取一次，此后保留最后有效数据。选点仅显示该时刻前一分钟的成交；历史数据不可用时不以其他日期代替。数据源不支持历史五档，选点时不展示最新盘口冒充历史。成交量与五档委托量按原始数量÷100显示为手；原始数据保持不变。行情可能延迟，暂未验证与官方客户端一致。</p>
+      <p class="thsdk-note">时间均为北京时间。成交明细显示所选交易日全天可用记录，点击或滑动走势图不缩小成交范围。最新视图显示数据源最近可用交易日；交易时段持续补充当天记录，休市不轮询。切换日期仅使用该日全天数据或该日已加载记录；取不到时明确提示，不以其他日期或一分钟数据代替。数据源不支持历史五档，选点时不展示最新盘口冒充历史。成交量与五档委托量按原始数量÷100显示为手；原始数据保持不变。行情可能延迟，暂未验证与官方客户端一致。</p>
     </section>
 
     <section class="card">
@@ -724,13 +724,15 @@ function tickRenderRowStats(rows=[],counts){
 function tickClear(){ $('thsdkTickHead').replaceChildren();$('thsdkTickBody').replaceChildren();$('thsdkTableWrap').hidden=true;tickLoadedSummary();tickRenderRowStats(); }
 function tickStop(){bookRecorder.pause();depthStop();tickState.enabled=false;clearInterval(tickState.timer);clearTimeout(tickState.debounce);tickState.controller?.abort();tickState.controller=null;tickState.generation++;$('thsdkStatus').textContent='已停止自动刷新，保留当前数据。';}
 function tickReset(){tickStop();tickState.key='';tickState.cache.clear();tickState.loadingDay='';tickState.viewRows=[];tickClear();depthReset();$('thsdkStockLabel').textContent='正在查询…';$('thsdkStatus').textContent='等待加载成交明细。';}
-function tickStart(force=true){tickState.enabled=true;clearInterval(tickState.timer);const ms=Math.max(1,Math.min(600,Number($('interval').value)||1))*1000;tickState.timer=setInterval(()=>{if(!marketPhase().open)return;if(!state.timer)void refreshQuote();if(!hoveredPointTime&&(!state.chartDate||state.chartDate===dayShanghai()))tickSync(true);},ms);tickSync(Boolean(force),true);}
+function tickStart(force=true){tickState.enabled=true;clearInterval(tickState.timer);const ms=Math.max(1,Math.min(600,Number($('interval').value)||1))*1000;tickState.timer=setInterval(()=>{if(!marketPhase().open)return;if(!state.timer)void refreshQuote();if(!state.chartDate||state.chartDate===dayShanghai())tickSync(true);},ms);tickSync(Boolean(force),true);}
 function tickQuery(){
   if(!/^\d{6}$/.test(state.code)||tickState.loadingDay)return null;
-  const pastDay=state.chartDate&&state.chartDate!==dayShanghai(),selected=hoveredPointTime||(pastDay?(state.chart.at(-1)?.time||`${state.chartDate} 15:00:00`):null);
-  const params=new URLSearchParams({code:state.code});let label='最新可用成交';
-  if(selected){const match=normalizeChartTime(selected).match(/^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})(:\d{2})?/);if(!match)return null;const clock=match[2]+(match[3]||':00');params.set('date',match[1]);params.set('time',clock);label=`${match[1]} ${clock} 前一分钟（北京时间）`;}
-  return {params,key:params.toString(),label};
+  // This endpoint supports the latest available day, not date-only requests.
+  // Keep the selected day in the view key and validate the returned day before display.
+  const day=state.chartDate&&state.chartDate!==dayShanghai()?state.chartDate:'';
+  const params=new URLSearchParams({code:state.code}),key=params.toString()+(day?'&viewDay='+day:'');
+  const label=day?`${day} · 全天可用成交（北京时间）`:'最新可用交易日 · 全天成交（北京时间）';
+  return {params,key,label,day};
 }
 function tickRowFingerprint(row){
   // 全字段、排序稳定的指纹；不把 transaction_count 当作唯一 id。
@@ -794,26 +796,34 @@ function tickCountRows(rawRows=[]){
 function tickRender(data){
   const {rows,counts}=tickCountRows(data.rows||[]),signature=JSON.stringify(rows.map(tickRowFingerprint));
   // 每次明细刷新均重算统计；相同数据只跳过表格重建，不跳过统计刷新。
-  if(tickState.signature===signature&&!$('thsdkTableWrap').hidden){tickRenderRowStats(rows,counts);if(!tickQuery()?.params.has('time'))$('thsdkTableWrap').scrollTop=0;return false;}
+  if(tickState.signature===signature&&!$('thsdkTableWrap').hidden){tickRenderRowStats(rows,counts);return false;}
   const wrap=$('thsdkTableWrap'),body=$('thsdkTickBody'),oldTop=wrap.scrollTop;
   let anchor=null;
-  if(tickQuery()?.params.has('time')&&!wrap.hidden&&oldTop>1){const visibleTop=oldTop+$('thsdkTickHead').offsetHeight,index=[...body.children].findIndex(tr=>tr.offsetTop+tr.offsetHeight>visibleTop);if(index>=0&&tickState.viewRows[index]){const key=tickRowFingerprint(tickState.viewRows[index]);anchor={key,occurrence:tickState.viewRows.slice(0,index+1).filter(r=>tickRowFingerprint(r)===key).length,offset:oldTop-body.children[index].offsetTop};}}
+  if(!wrap.hidden&&oldTop>1){const visibleTop=oldTop+$('thsdkTickHead').offsetHeight,index=[...body.children].findIndex(tr=>tr.offsetTop+tr.offsetHeight>visibleTop);if(index>=0&&tickState.viewRows[index]){const key=tickRowFingerprint(tickState.viewRows[index]);anchor={key,occurrence:tickState.viewRows.slice(0,index+1).filter(r=>tickRowFingerprint(r)===key).length,offset:oldTop-body.children[index].offsetTop};}}
   tickState.signature=signature;tickState.viewRows=rows;tickClear();tickLoadedSummary(rows);tickRenderRowStats(rows,counts);if(!rows.length)return true;
   const head=document.createElement('tr');for(const label of ['时间（北京时间）','成交价','成交量（手）','笔数']){const th=document.createElement('th');th.textContent=label;head.appendChild(th);}$('thsdkTickHead').appendChild(head);
   const fragment=document.createDocumentFragment();for(const row of rows){const tr=document.createElement('tr'),count=counts.get(row),session=tickCountSession(row),volume=tickLots(row.volume),countText=session?.phase==='pre'?'—':count===null?'—笔':String(count);for(const value of [tickClock(row.time)||'时间暂不可用',tickText(row.price),volume,countText]){const td=document.createElement('td');td.textContent=value;if(tr.children.length===3&&session?.phase!=='pre')td.title='盘中及当天首条收盘普通成交（可延迟返回）：按同日累计笔数差值计算，不按固定延迟秒数截断；已结算收盘后的盘后成交：有成交为1笔；零成交保留并显示0笔；—表示缺少可靠前值。';tr.appendChild(td);}fragment.appendChild(tr);}body.appendChild(fragment);wrap.hidden=false;
   if(anchor){let occurrence=0,index=rows.findIndex(row=>tickRowFingerprint(row)===anchor.key&&++occurrence===anchor.occurrence);wrap.scrollTop=index>=0?body.children[index].offsetTop+anchor.offset:oldTop;}else wrap.scrollTop=0;
   return true;
 }
-function tickSummary(data,cached=false,latest=false,readAt=0){const last=(data.rows||[]).reduce((max,r)=>Number.isFinite(Number(r.time))?Math.max(max,Number(r.time)):max,-Infinity);return data.rows?.length?tickCountTotalText(data.rows) + `｜最近成交：${tickClock(last)||'时间暂不可用'}（北京时间）${cached?`｜上次成功读取：${readAt?tickSourceTime(readAt):'时间暂不可用'}`:''}${data.history?.note?`｜${String(data.history.note).slice(0,80)}`:''}${marketPhase().open?'':'｜休市，暂停自动刷新'}`:'该时段暂无可用成交，不以其他日期数据代替。';}
+function tickSummary(data,cached=false,latest=false,readAt=0){const last=(data.rows||[]).reduce((max,r)=>Number.isFinite(Number(r.time))?Math.max(max,Number(r.time)):max,-Infinity);return data.rows?.length?tickCountTotalText(data.rows) + `｜全天已加载 ${data.rows.length} 条记录｜最近成交：${tickClock(last)||'时间暂不可用'}（北京时间）${cached?`｜上次成功读取：${readAt?tickSourceTime(readAt):'时间暂不可用'}`:''}${data.history?.note?`｜${String(data.history.note).slice(0,80)}`:''}${marketPhase().open?'':'｜休市，暂停自动刷新'}`:'该日暂无可用成交，不以其他日期数据代替。';}
+function tickDayCache(q){
+  const entry=tickState.cache.get(q.key);
+  const matches=rows=>Array.isArray(rows)&&rows.length&&(!q.day||rows.every(row=>tickRowBeijingDay(row)===q.day));
+  if(entry&&entry.data?.bounds?.mode!=='minute'&&!entry.data?.query?.time&&matches(entry.data?.rows))return entry;
+  const lastKey=q.day?`${state.code}|${q.day}`:[...tickState.latestCache.keys()].filter(key=>key.startsWith(state.code+'|')&&tickState.latestCache.get(key)?.length).sort().at(-1);
+  const rows=lastKey?tickState.latestCache.get(lastKey):null;
+  if(matches(rows))return {at:0,data:{rows,bounds:{mode:'available-day',day:lastKey.split('|')[1]}}};
+  return null;
+}
 function tickSync(force=false,explicit=false){
   if(!tickState.enabled)return;depthSync(force,explicit);const q=tickQuery();if(!q)return;
-  const changed=q.key!==tickState.key,canRequest=q.params.has('time')||marketPhase().open||explicit||changed;
-  let cached=tickState.cache.get(q.key);
-  if(!cached&&!q.params.has('time')){const lastKey=[...tickState.latestCache.keys()].filter(k=>k.startsWith(state.code+'|')&&tickState.latestCache.get(k)?.length).sort().at(-1);if(lastKey)cached={at:0,data:{rows:tickState.latestCache.get(lastKey)}};}
+  const changed=q.key!==tickState.key,canRequest=marketPhase().open||explicit||changed;
+  const cached=tickDayCache(q);
   if(changed){clearTimeout(tickState.debounce);tickState.controller?.abort();tickState.controller=null;tickState.generation++;tickState.key=q.key;if(cached?.data.rows?.length)tickRender(cached.data);else tickClear();}
   $('thsdkStockLabel').textContent=`${state.name||state.code}（${state.code}）`;$('thsdkMode').textContent=q.label;
-  const liveFailure=tickState.failureKey===q.key&&!q.params.has('time');
-  if(cached&&(!canRequest||(!force&&Date.now()-cached.at<60000))&&!liveFailure){tickRender(cached.data);$('thsdkStatus').classList.remove('thsdk-error');$('thsdkStatus').textContent=tickSummary(cached.data,true,!q.params.has('time'),cached.successAt);return;}
+  const liveFailure=tickState.failureKey===q.key;
+  if(cached&&(!canRequest||(!force&&Date.now()-cached.at<60000))&&!liveFailure){tickRender(cached.data);const shownDay=tickRowBeijingDay(cached.data.rows[0])||cached.data.bounds?.day;if(shownDay)$('thsdkMode').textContent=`${shownDay} · 全天可用成交（北京时间）`;$('thsdkStatus').classList.remove('thsdk-error');$('thsdkStatus').textContent=tickSummary(cached.data,true,true,cached.successAt);return;}
   if(!canRequest){if(changed||$('thsdkTableWrap').hidden)$('thsdkStatus').textContent='休市，保留最后有效成交，暂停自动刷新。';return;}
   if(!changed&&!force&&!explicit&&!liveFailure)return;if(tickState.controller||thsdkReadUntil(`${THSDK_TICK_API}?${q.params}`)>Date.now())return;
   clearTimeout(tickState.debounce);$('thsdkStatus').classList.remove('thsdk-error');if($('thsdkTableWrap').hidden)$('thsdkStatus').textContent='正在加载成交…';
@@ -826,19 +836,17 @@ async function tickFetch(q,generation,explicit=false){
   let stage='read';
   try{const data=await tickReadResponse(q,controller.signal);
     if(data.source!=='THSDK'||data.code!==q.params.get('code')||!Array.isArray(data.columns)||!Array.isArray(data.rows))throw Error('逐笔响应字段或股票代码不匹配');
-    if(q.params.has('date')&&(data.query?.date!==q.params.get('date')||data.query?.time!==q.params.get('time')))throw Error('逐笔响应日期或时间不匹配');
     if(generation!==tickState.generation||q.key!==tickState.key||!tickState.enabled)return;
+    if(data.bounds?.mode==='minute'||data.query?.time)throw Error('数据源仅返回一分钟记录，不能作为全天成交显示');
+    const sourceDays=[...new Set(data.rows.map(tickRowBeijingDay).filter(Boolean))];
+    const day=sourceDays.sort().at(-1)||String(data.bounds?.day||data.history?.day||'')||(q.day?'':dayShanghai());
+    if(q.day&&(day!==q.day||sourceDays.some(sourceDay=>sourceDay!==q.day)))throw Error(`数据源最近可用交易日为 ${day||'未知'}，未提供 ${q.day} 的全天成交`);
     stage='display';bookRecorder.capture('ticks',data,Object.fromEntries(q.params));
-    if(!data.rows.length){$('thsdkStatus').classList.remove('thsdk-error');$('thsdkStatus').textContent=!$('thsdkTableWrap').hidden?'暂无新成交，保留最后有效数据。':'暂无可用成交；有数据后将自动显示。';return;}
-    if(q.params.has('time')){
-      const successAt=Date.now();tickRender(data);$('thsdkStatus').classList.remove('thsdk-error');$('thsdkStatus').textContent=tickSummary(data,false,false,successAt);tickState.cache.set(q.key,{at:successAt,successAt,data});tickState.failureKey='';tickState.lastSuccessAt=successAt;
-    }else{
-      const sourceDays=[...new Set(data.rows.map(tickRowBeijingDay).filter(Boolean))],day=sourceDays.sort().at(-1)||String(data.history?.day||'')||dayShanghai(),cacheKey=`${state.code}|${day}`;
-      const merged=tickMergeRows(tickLatestRows(state.code,day),data.rows.filter(r=>!tickRowBeijingDay(r)||tickRowBeijingDay(r)===day));
-      const successAt=Date.now();tickState.latestCache.set(cacheKey,merged);const view={...data,rows:merged};tickRender(view);$('thsdkStatus').classList.remove('thsdk-error');$('thsdkStatus').textContent=tickSummary(view,false,true,successAt);tickState.cache.set(q.key,{at:successAt,successAt,data:view});tickState.failureKey='';tickState.lastSuccessAt=successAt;
-    }
+    if(!data.rows.length){$('thsdkStatus').classList.remove('thsdk-error');$('thsdkStatus').textContent=!$('thsdkTableWrap').hidden?'暂无新成交，保留该日最后有效数据。':`${q.day||'最新可用交易日'} 暂无可用全天成交；不以其他日期代替。`;return;}
+    const cacheKey=`${state.code}|${day}`,merged=tickMergeRows(tickLatestRows(state.code,day),data.rows.filter(row=>!tickRowBeijingDay(row)||tickRowBeijingDay(row)===day));
+    const successAt=Date.now();tickState.latestCache.set(cacheKey,merged);const view={...data,rows:merged};tickRender(view);$('thsdkMode').textContent=`${day} · 全天可用成交（北京时间）`;$('thsdkStatus').classList.remove('thsdk-error');$('thsdkStatus').textContent=tickSummary(view,false,true,successAt);tickState.cache.set(q.key,{at:successAt,successAt,data:view});tickState.failureKey='';tickState.lastSuccessAt=successAt;
     if(tickState.cache.size>128)tickState.cache.delete(tickState.cache.keys().next().value);
-  }catch(error){if(generation!==tickState.generation||q.key!==tickState.key||!tickState.enabled)return;tickState.failureKey=q.key;const reason=stage==='display'?'成交已读取，但页面处理失败':error.name==='AbortError'?'逐笔读取超时':error instanceof TypeError?'逐笔网络连接失败':error.message;thsdkTrace({resource:'/api/ticks?'+q.params,stage,ok:false,status:error.status||0,sourceCode:error.sourceCode||null,reason,retainedRows:tickState.viewRows.length});console.warn('逐笔'+stage+'失败',error);$('thsdkStatus').classList.add('thsdk-error');$('thsdkStatus').textContent=(q.params.has('date')?`${q.params.get('date')} 所选时段的成交暂不可用，不使用其他日期代替。`:'最新成交暂时无法读取。')+`原因：${reason}。`+(!$('thsdkTableWrap').hidden?'保留上次数据。':'暂无可显示数据。')+(marketPhase().open?'交易时段将自动重试。':'可点击“返回最新”重试。');}
+  }catch(error){if(generation!==tickState.generation||q.key!==tickState.key||!tickState.enabled)return;tickState.failureKey=q.key;const reason=stage==='display'?'成交已读取，但页面处理失败':error.name==='AbortError'?'逐笔读取超时':error instanceof TypeError?'逐笔网络连接失败':error.message;thsdkTrace({resource:'/api/ticks?'+q.params,stage,ok:false,status:error.status||0,sourceCode:error.sourceCode||null,reason,retainedRows:tickState.viewRows.length});console.warn('逐笔'+stage+'失败',error);$('thsdkStatus').classList.add('thsdk-error');$('thsdkStatus').textContent=(q.day?`${q.day} 所选日期的全天成交暂不可用，不使用其他日期代替。`:'最新成交暂时无法读取。')+`原因：${reason}。`+(!$('thsdkTableWrap').hidden?'保留该日上次数据。':'暂无可显示数据。')+(marketPhase().open?'交易时段将自动重试。':'可点击“返回最新”重试。');}
   finally{clearTimeout(timeout);if(tickState.controller===controller)tickState.controller=null;}
 }
 function tickDateBegin(day){if(!tickState.enabled)return;tickState.loadingDay=day;tickState.generation++;tickState.controller?.abort();tickState.controller=null;clearTimeout(tickState.debounce);tickState.key='';tickClear();depthShow();$('thsdkMode').textContent=`正在加载 ${day}`;$('thsdkStatus').textContent='正在切换日期…';}
