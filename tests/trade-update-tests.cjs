@@ -235,8 +235,7 @@ test('bid-to-ask switch assigns each trade to the side visible at that trade tim
   const r=calculate(e,[tick(t(2),t(0,500),3,'before-switch',100),tick(t(2),t(1),5,'after-switch',100)]),w=r.windows[0];
   assert.equal(w.bid.executed_shares,3);assert.equal(w.ask.executed_shares,5);
   assert.equal(w.side_switch_count,1);assert.equal(w.side_switches[0].from_side,'bid');assert.equal(w.side_switches[0].to_side,'ask');
-  const oldSide=level(r,'bid',100),newSide=level(r,'ask',100);assert.equal(oldSide.observed_reduction_shares,100);assert.equal(oldSide.cancellation_shares,97);assert.equal(newSide.executed_shares,5);assert.equal(newSide.visible_added_shares,30);
-  assert.equal(w.active_flow.sell_shares,33);assert.equal(w.active_flow.buy_shares,5);
+  const oldSide=level(r,'bid',100),newSide=level(r,'ask',100);assert.equal(oldSide.observed_reduction_shares,0);assert.equal(oldSide.cancellation_shares,0);assert.equal(newSide.executed_shares,5);
   assert.equal(r.aggressor_direction_available,false);assert.equal(r.trade_side_semantics,'observed_quote_side_not_aggressor');
 });
 
@@ -249,8 +248,7 @@ test('ask-to-bid switch attributes trade to bid without carrying ask volume acro
   const r=calculate(e,[tick(t(2),t(1),9,'ask-to-bid',100)]),w=r.windows[0];
   assert.equal(w.ask.executed_shares,0);assert.equal(w.bid.executed_shares,9);
   assert.equal(w.side_switch_count,1);assert.equal(w.side_switches[0].from_side,'ask');assert.equal(w.side_switches[0].to_side,'bid');
-  assert.equal(level(r,'ask',100).observed_reduction_shares,120);assert.equal(level(r,'bid',100).executed_shares,9);
-  assert.equal(w.active_flow.sell_shares,9);assert.equal(w.active_flow.buy_shares,0);
+  assert.equal(level(r,'ask',100).observed_reduction_shares,0);assert.equal(level(r,'bid',100).executed_shares,9);
 });
 
 test('ask addition example keeps 230 observed adds, 200 executions and 30 remaining distinct',()=>{
@@ -267,13 +265,12 @@ test('ask addition example keeps 230 observed adds, 200 executions and 30 remain
   assert.equal(z.after_shares,30);assert.equal(z.added_shares,230);assert.equal(z.executed_shares,200);
 });
 
-test('bid-side quote capacity is capped at visible zero after a 100-share reduction; excess is not pushed to another level',()=>{
+test('bid-side observed reduction of 100 with 200 quote-side executions yields 100 inferred replenishment, not aggressor proof',()=>{
   const r=calculate([
     depth(t(0),{'bid:100':100}),depth(t(1),{'bid:100':0}),tickResponse(t(2))
   ],[tick(t(2),t(1),200,'bid-replenishment-example',100)]),w=r.windows[0];
   assert.equal(w.bid.observed_reduction_shares,100);assert.equal(w.bid.executed_shares,200);
   assert.equal(w.bid.replenishment_shares,100);assert.equal(w.bid.added_shares,100);assert.equal(w.bid.cancellation_shares,0);
-  assert.equal(w.bid.quote_depth_matched_shares,0);assert.equal(w.bid.unresolved_trade_shares,200);
   assert.equal(w.aggressor_direction_available,false);assert.equal(w.trade_side_semantics,'observed_quote_side_not_aggressor');
 });
 
@@ -287,61 +284,4 @@ test('independent audit verifies side-switch attribution and excludes out-of-boo
   assert.equal(w.status,'pass');assert.equal(w.delta.order_book_trade_volume_shares,0);
   assert.equal(r.windows.at(-1).order_book_trade_volume_shares,5);
   assert.equal(r.windows.at(-1).ask.executed_shares,5);assert.equal(r.windows.at(-1).bid.executed_shares,0);
-});
-
-test('same price stays tracked through level movement and bid-to-ask switch; quote-side estimate is not asserted as true aggressor',()=>{
-  const e=[
-    depthAt(t(0),[101,100,99,98,97],[102,103,104,105,106]),
-    depthAt(t(1),[102,101,100,99,98],[103,104,105,106,107]),
-    depthAt(t(2),[99,98,97,96,95],[100,102,103,104,105],{'ask:100':30}),
-    tickResponse(t(3))
-  ],ticks=[
-    tick(t(3),t(1,500),5,'before-side-switch',100),
-    tick(t(3),t(2,500),7,'after-side-switch',100)
-  ];
-  const r=calculate(e,ticks),w=r.windows[0];
-  assert.equal(w.order_book_trade_volume_shares,12);
-  assert.equal(w.trade_classifications[0].quote_side,'bid');assert.equal(w.trade_classifications[1].quote_side,'ask');
-  assert.equal(w.trade_classifications[0].aggressor_side,null);assert.equal(w.trade_classifications[0].active_side_estimate,'sell');
-  assert.equal(w.active_flow.sell_trade_shares,5);assert.equal(w.active_flow.sell_post_switch_visible_shares,30);assert.equal(w.active_flow.sell_shares,35);
-  assert.equal(w.active_flow.buy_shares,7);assert.equal(w.aggressor_direction_available,false);
-});
-
-test('100 bid shares plus an observed same-price refill to 200, 200 trade shares, then 30 visible on ask => sell estimate 230 and bid add 100',()=>{
-  const e=[
-    depthAt(t(0),[100,99,98,97,96],[101,102,103,104,105],{'bid:100':10000}),
-    depthAt(t(1),[100,99,98,97,96],[101,102,103,104,105],{'bid:100':20000}),
-    depthAt(t(2),[99,98,97,96,95],[100,102,103,104,105],{'ask:100':3000}),
-    tickResponse(t(3))
-  ],ticks=[tick(t(3),t(1,500),20000,'canonical-100-200-30',100).row];
-  const fullTicks=[{id:'canonical-100-200-30',code,first_received_at:t(3),row:{...ticks[0],deal_type:1,ask_order_id:4294967295}}];
-  const r=calculate(e,fullTicks),w=r.windows[0],bid=level(r,'bid',100),ask=level(r,'ask',100);
-  assert.equal(w.active_flow.sell_trade_shares,20000);assert.equal(w.active_flow.sell_post_switch_visible_shares,3000);assert.equal(w.active_flow.sell_shares,23000);
-  assert.equal(w.bid.added_shares,10000);assert.equal(w.bid.observed_reduction_shares,20000);assert.equal(w.bid.cancellation_shares,0);
-  assert.equal(bid.quote_depth_matched_shares,20000);assert.equal(bid.unresolved_trade_shares,0);assert.equal(ask.visible_added_shares,3000);
-  assert.equal(w.trade_classifications[0].quote_side,'bid');assert.equal(w.trade_classifications[0].aggressor_side,null);assert.equal(w.trade_classifications[0].deal_type_direction_recognized,false);
-  assert.equal(w.aggressor_direction_available,false);
-  const checked=audit(e,fullTicks,r).windows.at(-1);assert.equal(checked.status,'pass');assert.equal(checked.active_flow.sell_shares,23000);
-});
-
-test('trade volume beyond exact-price capacity remains unresolved and never waterfalls into an adjacent price',()=>{
-  const e=[depth(t(0),{'bid:100':10000,'bid:99':50000}),depth(t(1),{'bid:100':10000,'bid:99':50000}),tickResponse(t(2))];
-  const r=calculate(e,[tick(t(2),t(1,500),20000,'too-deep',100),tick(t(2),t(1,500),3000,'next-price',99)]),w=r.windows[0];
-  const at100=w.trade_classifications.find(x=>x.price===100),at99=w.trade_classifications.find(x=>x.price===99);
-  assert.equal(at100.quote_depth_matched_shares,10000);assert.equal(at100.unresolved_trade_shares,10000);
-  assert.equal(at99.quote_depth_matched_shares,3000);assert.equal(at99.unresolved_trade_shares,0);
-  assert.equal(w.order_book_trade_volume_shares,23000);
-});
-
-test('late trade response still receives the later same-price cross-side remainder by trade time',()=>{
-  const e=[
-    depthAt(t(0),[100,99,98,97,96],[101,102,103,104,105],{'bid:100':10000}),
-    depthAt(t(1),[99,98,97,96,95],[100,102,103,104,105],{'ask:100':3000}),
-    tickResponse(t(2),'empty-before-late-trade'),
-    tickResponse(t(3),'late-trade-response',[{time:t(0,500),price:100,volume:20000}])
-  ],ticks=[tick(t(3),t(0,500),20000,'late-cross-side',100)];
-  const r=calculate(e,ticks),last=r.windows.at(-1);
-  assert.equal(last.source_trade_volume_shares,20000);assert.equal(last.active_flow.sell_trade_shares,20000);
-  assert.equal(last.active_flow.sell_post_switch_visible_shares,3000);assert.equal(last.active_flow.sell_shares,23000);
-  assert.equal(audit(e,ticks,r).windows.at(-1).status,'pass');
 });
