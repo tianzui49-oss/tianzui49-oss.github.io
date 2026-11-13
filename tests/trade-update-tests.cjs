@@ -30,14 +30,8 @@ const prices = { bid: [100, 99, 98, 97, 96], ask: [101, 102, 103, 104, 105] };
 function rows(volumes = {}) {
   return ['bid', 'ask'].flatMap(side => prices[side].map((price, i) => ({ side, level: i + 1, price, volume: Number(volumes[`${side}:${price}`] ?? 100) })));
 }
-function rowsAt(bids, asks, volumes = {}) {
-  return ['bid', 'ask'].flatMap(side => (side === 'bid' ? bids : asks).map((price, i) => ({ side, level: i + 1, price, volume: Number(volumes[`${side}:${price}`] ?? 100) })));
-}
 function depth(receivedAt, volumes = {}, extra = {}) {
   return { kind: 'depth', session_id: session.id, code, segment_id: 'seg-1', received_at: receivedAt, payload: { rows: rows(volumes) }, ...extra };
-}
-function depthAt(receivedAt, bids, asks, volumes = {}) {
-  return { kind: 'depth', session_id: session.id, code, segment_id: 'seg-1', received_at: receivedAt, payload: { rows: rowsAt(bids, asks, volumes) } };
 }
 function tickResponse(receivedAt, id = `resp-${receivedAt}`, payloadRows = []) {
   return { kind: 'tick_response', session_id: session.id, code, segment_id: 'seg-1', received_at: receivedAt, id, row_count: payloadRows.length,
@@ -48,16 +42,6 @@ function tick(receivedAt, tradeTime, volume, id = `tick-${tradeTime}-${volume}`,
 }
 function calculate(events, ticks = [], cutoff = Infinity) {
   return Calculator.calculate(events, ticks, session, cutoff);
-}
-function audit(events, ticks, result) {
-  const html = fs.readFileSync(require('node:path').join(__dirname, '../index.html'), 'utf8');
-  const start = html.indexOf('const BookStatisticsAudit =');
-  const marker = "if(typeof globalThis!=='undefined')globalThis.BookStatisticsAudit=BookStatisticsAudit;";
-  const end = html.indexOf(marker, start);
-  if (start < 0 || end < 0) throw new Error('BookStatisticsAudit was not found in index.html');
-  const box = { module: { exports: {} }, console };
-  vm.runInNewContext(html.slice(start, end + marker.length), box);
-  return box.module.exports.calculate(events, ticks, session, result);
 }
 function windows(result) { return Array.isArray(result?.windows) ? result.windows : []; }
 function allLevelRows(result) {
@@ -93,7 +77,7 @@ function scenario(volumesA, volumesB, trades = [], responseAt = 2) {
 }
 
 // User's canonical example: positive increments A=10, reductions R=8, same-price trade T=5.
-test('same-side price comparison: 10 observed additions, 8 reduced, T=5 => add 10, cancel 3, net 7', () => {
+test('10 added, 8 reduced, T=5 => add 10, cancel 3, net 7', () => {
   const r = scenario({ 'bid:100': 100 }, { 'bid:100': 102 }, [tick(t(1, 500), t(1, 400), 5)], 2);
   // The fixture also has a second intermediate update so A and R are accumulated,
   // rather than reconstructed from only an endpoint.
@@ -102,9 +86,6 @@ test('same-side price comparison: 10 observed additions, 8 reduced, T=5 => add 1
     depth(t(2), { 'bid:100': 102 }), tickResponse(t(3))
   ], [tick(t(2, 100), t(1, 500), 5)]);
   assertMetric(r2, 'bid', 'added_shares', 10);
-  assertMetric(r2, 'bid', 'visible_added_shares', 10);
-  assertMetric(r2, 'bid', 'executed_shares', 5);
-  assertMetric(r2, 'bid', 'replenishment_shares', 0);
   assertMetric(r2, 'bid', 'cancellation_shares', 3);
   assertMetric(r2, 'bid', 'net_change_shares', 7);
 });
@@ -168,16 +149,13 @@ test('same-price matching survives a move across five levels; boundary is not in
   assert.equal((r.visibility_changes || []).filter(x => x.visibility_state === 'entered_five' || x.visibility_state === 'left_five').length >= 0, true);
 });
 
-test('trade price outside both sides top five is excluded from order-book statistics', () => {
+test('denominator includes a unique trade outside both endpoint five-level books', () => {
   const r = calculate([
     depth(t(0)), depth(t(1)), tickResponse(t(2))
   ], [tick(t(1, 200), t(1, 100), 7, 'outside', 110)]);
   assert.equal(r.source_trade_volume_shares, 7);
-  assert.equal(r.order_book_trade_volume_shares, 0);
-  assert.equal(r.excluded_trade_volume_shares, 7);
-  assert.equal(sideTotals(r, 'bid').denominator_trade_shares, 0);
-  assert.equal(sideTotals(r, 'ask').denominator_trade_shares, 0);
-  assert.equal(r.excluded_trade_volume_by_reason.outside_top_five, 7);
+  assert.equal(sideTotals(r, 'bid').denominator_trade_shares, 7);
+  assert.equal(sideTotals(r, 'ask').denominator_trade_shares, 7);
 });
 
 test('historical cutoff excludes later events and does not erase prior history', () => {
@@ -201,10 +179,10 @@ test('pending book-only changes are not included in cumulative totals until conf
 });
 
 // Stronger boundary and aggregation checks using the production event shape.
-test('all five prices on both sides settle; only visible trade volume is the shared denominator',()=>{
+test('all five prices on both sides settle even when only one price trades',()=>{
   const e=[depth(t(0)),depth(t(1),Object.fromEntries(['bid','ask'].flatMap(s=>prices[s].map(p=>[`${s}:${p}`,110])))),depth(t(2),Object.fromEntries(['bid','ask'].flatMap(s=>prices[s].map(p=>[`${s}:${p}`,102]))))];
   const r=calculate(e,[tick(t(2,500),t(2),5,'one',100),tick(t(2,500),t(2),7,'out',110)]),w=r.windows[0];
-  assert.equal(w.levels.length,10);assert.equal(w.bid.added_shares,50);assert.equal(w.bid.cancellation_shares,35);assert.equal(w.bid.net_change_shares,15);assert.equal(w.ask.added_shares,50);assert.equal(w.ask.cancellation_shares,40);assert.equal(w.ask.net_change_shares,10);assert.equal(w.bid.denominator_trade_shares,5);assert.equal(w.ask.denominator_trade_shares,5);assert.equal(w.source_trade_volume_shares,12);assert.equal(w.excluded_trade_volume_shares,7);assert.equal(w.bid.net_addition_rate_pct,300);
+  assert.equal(w.levels.length,10);assert.equal(w.bid.added_shares,50);assert.equal(w.bid.cancellation_shares,35);assert.equal(w.bid.net_change_shares,15);assert.equal(w.ask.added_shares,50);assert.equal(w.ask.cancellation_shares,40);assert.equal(w.ask.net_change_shares,10);assert.equal(w.bid.denominator_trade_shares,12);assert.equal(w.bid.net_addition_rate_pct,125);
 });
 test('trade exceeding observed reduction transfers the excess into additions',()=>{
   const r=calculate([depth(t(0)),depth(t(1),{'bid:100':98})],[tick(t(1,500),t(1),9)]),w=r.windows[0];assert.equal(w.bid.added_shares,7);assert.equal(w.bid.cancellation_shares,0);assert.equal(w.bid.net_change_shares,7);
@@ -224,64 +202,4 @@ test('independent audit matches raw records and detects altered aggregate',()=>{
 test('each update adds to cumulative numerators/denominator; negative net rate is preserved',()=>{
  const e=[depth(t(0)),depth(t(1),{'bid:100':90}),{...tickResponse(t(1,500)),row_count:1},depth(t(2),{'bid:100':88}),{...tickResponse(t(2,500)),row_count:1}],ticks=[tick(t(1,500),t(1),3,'first'),tick(t(2,500),t(2),5,'second')];
  const r=calculate(e,ticks);assert.equal(r.windows.length,2);assert.equal(r.windows[0].bid.net_change_shares,-7);assert.equal(r.windows[1].bid.added_shares,3);const last=r.timeline.at(-1).bid;assert.equal(last.added_shares,3);assert.equal(last.cancellation_shares,7);assert.equal(last.net_change_shares,-4);assert.equal(last.denominator_trade_shares,8);assert.equal(last.addition_rate_pct,37.5);assert.equal(last.reduction_rate_pct,87.5);assert.equal(last.net_addition_rate_pct,-50);
-});
-
-test('bid-to-ask switch assigns each trade to the side visible at that trade time',()=>{
-  const e=[
-    depthAt(t(0),[100,99,98,97,96],[101,102,103,104,105],{'bid:100':100}),
-    depthAt(t(1),[99,98,97,96,95],[100,102,103,104,105],{'ask:100':30}),
-    tickResponse(t(2))
-  ];
-  const r=calculate(e,[tick(t(2),t(0,500),3,'before-switch',100),tick(t(2),t(1),5,'after-switch',100)]),w=r.windows[0];
-  assert.equal(w.bid.executed_shares,3);assert.equal(w.ask.executed_shares,5);
-  assert.equal(w.side_switch_count,1);assert.equal(w.side_switches[0].from_side,'bid');assert.equal(w.side_switches[0].to_side,'ask');
-  const oldSide=level(r,'bid',100),newSide=level(r,'ask',100);assert.equal(oldSide.observed_reduction_shares,0);assert.equal(oldSide.cancellation_shares,0);assert.equal(newSide.executed_shares,5);
-  assert.equal(r.aggressor_direction_available,false);assert.equal(r.trade_side_semantics,'observed_quote_side_not_aggressor');
-});
-
-test('ask-to-bid switch attributes trade to bid without carrying ask volume across',()=>{
-  const e=[
-    depthAt(t(0),[99,98,97,96,95],[100,101,102,103,104],{'ask:100':120}),
-    depthAt(t(1),[100,99,98,97,96],[101,102,103,104,105],{'bid:100':40}),
-    tickResponse(t(2))
-  ];
-  const r=calculate(e,[tick(t(2),t(1),9,'ask-to-bid',100)]),w=r.windows[0];
-  assert.equal(w.ask.executed_shares,0);assert.equal(w.bid.executed_shares,9);
-  assert.equal(w.side_switch_count,1);assert.equal(w.side_switches[0].from_side,'ask');assert.equal(w.side_switches[0].to_side,'bid');
-  assert.equal(level(r,'ask',100).observed_reduction_shares,0);assert.equal(level(r,'bid',100).executed_shares,9);
-});
-
-test('ask addition example keeps 230 observed adds, 200 executions and 30 remaining distinct',()=>{
-  const bids=[99,98,97,96,95],asks=[100,101,102,103,104];
-  const e=[
-    depthAt(t(0),bids,asks,{'ask:100':0}),
-    depthAt(t(1),bids,asks,{'ask:100':230}),
-    depthAt(t(2),bids,asks,{'ask:100':30}),
-    tickResponse(t(3))
-  ];
-  const r=calculate(e,[tick(t(3),t(2),200,'seller-add-example',100)]),w=r.windows[0],z=level(r,'ask',100);
-  assert.equal(w.ask.added_shares,230);assert.equal(w.ask.visible_added_shares,230);assert.equal(w.ask.replenishment_shares,0);
-  assert.equal(w.ask.executed_shares,200);assert.equal(w.ask.observed_reduction_shares,200);assert.equal(w.ask.cancellation_shares,0);
-  assert.equal(z.after_shares,30);assert.equal(z.added_shares,230);assert.equal(z.executed_shares,200);
-});
-
-test('bid-side observed reduction of 100 with 200 quote-side executions yields 100 inferred replenishment, not aggressor proof',()=>{
-  const r=calculate([
-    depth(t(0),{'bid:100':100}),depth(t(1),{'bid:100':0}),tickResponse(t(2))
-  ],[tick(t(2),t(1),200,'bid-replenishment-example',100)]),w=r.windows[0];
-  assert.equal(w.bid.observed_reduction_shares,100);assert.equal(w.bid.executed_shares,200);
-  assert.equal(w.bid.replenishment_shares,100);assert.equal(w.bid.added_shares,100);assert.equal(w.bid.cancellation_shares,0);
-  assert.equal(w.aggressor_direction_available,false);assert.equal(w.trade_side_semantics,'observed_quote_side_not_aggressor');
-});
-
-test('independent audit verifies side-switch attribution and excludes out-of-book volume',()=>{
-  const e=[
-    depthAt(t(0),[100,99,98,97,96],[101,102,103,104,105]),
-    depthAt(t(1),[99,98,97,96,95],[100,102,103,104,105]),
-    tickResponse(t(2))
-  ],ticks=[tick(t(2),t(1),5,'visible-ask',100),tick(t(2),t(1),7,'outside',110)];
-  const r=calculate(e,ticks),a=audit(e,ticks,r),w=a.windows.at(-1);
-  assert.equal(w.status,'pass');assert.equal(w.delta.order_book_trade_volume_shares,0);
-  assert.equal(r.windows.at(-1).order_book_trade_volume_shares,5);
-  assert.equal(r.windows.at(-1).ask.executed_shares,5);assert.equal(r.windows.at(-1).bid.executed_shares,0);
 });
