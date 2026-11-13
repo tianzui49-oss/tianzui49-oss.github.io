@@ -94,3 +94,35 @@ test('没有已结算数据：缺口提示不显示任何成交数值', () => {
   assert.ok(!r.text.includes('本次成交'));
   h.dom.window.close();
 });
+
+test('一个结算区间跨过11:00–11:30暂停：平线只放在缺口，前面的观测线不能被拉平', () => {
+  const first = interval('10:30:00', '10:30:03', 100);
+  const next = interval('10:30:03', '11:30:00', 300);
+  next.spans = [[at('10:30:03'), at('11:00:00')], [at('11:30:00'), at('11:30:00')]];
+  const h = load([first, next]);
+  for (const side of ['bid', 'ask']) {
+    const p = h.pts('net', side);
+    const before = p.filter(([x]) => x < 150).at(-1);
+    const start = p.find(([x]) => x === 150);
+    const end = p.find(([x]) => x === 200);
+    assert.ok(before && start && end);
+    assert.notEqual(before[1], start[1], '10:30–11:00 has observations, so it must retain its change');
+    assert.equal(start[1], end[1], 'only 11:00–11:30 holds the last position');
+  }
+  assert.ok(h.slide('11:15:00').text.includes('此时未观测'));
+  assert.ok(!h.slide('10:45:00').text.includes('此时未观测'));
+  assert.equal(h.d.querySelectorAll('.book-wave-start').length, 0, 'no full-width extra reference lines');
+  h.dom.window.close();
+});
+
+test('盘口已在11:00结束、成交响应迟到11:20：水平延伸从11:00开始而非响应时间', () => {
+  const a = interval('10:30:00', '10:30:03', 100);
+  const b = interval('10:30:03', '11:20:00', 300);
+  b.spans = [[at('10:30:03'), at('11:00:00')]];
+  const h = load([a, b]), p = h.pts('net', 'bid');
+  const start = p.find(([x]) => x === 150);
+  assert.ok(start);
+  assert.equal(start[1], p.at(-1)[1]);
+  assert.ok(h.slide('11:10:00').text.includes('此时未观测'));
+  h.dom.window.close();
+});

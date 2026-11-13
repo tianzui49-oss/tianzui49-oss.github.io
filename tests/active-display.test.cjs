@@ -109,3 +109,47 @@ test('actual calculator and recorder refresh visible active totals without doubl
     assert.deepEqual(values(), ['3', '2'], 'returning to latest restores observed totals');
   } finally { dom.window.close(); }
 });
+
+test('周六建立新会话后查看周五：累计统计与四图读取同一历史缓存，采集会话不回退', async () => {
+  const { w, dom, capture, payload } = await harness();
+  try {
+    const api = w.__activeTest;
+    api.state.code = '600000'; api.state.chartDate = '2026-11-13';
+    await api.bookRecorder.begin('600000'); await wait(60);
+    w.__now = base + 1000;
+    const book = payload('depth');
+    book.rows.find(r => r.side === 'bid' && r.level === 1).volume = 12000;
+    book.rows.find(r => r.side === 'ask' && r.level === 1).volume = 9000;
+    api.bookRecorder.capture('depth', book); await wait(40);
+    await capture('ticks', 1500, [
+      { time: (base + 1200) / 1000, price: 10.01, volume: 300 },
+      { time: (base + 1300) / 1000, price: 10, volume: 200 }
+    ]);
+    w.__now = base + 86400000;
+    api.state.chartDate = '2026-11-14';
+    await api.bookRecorder.begin('600000', new w.Date().toISOString(), true); await wait(60);
+    api.state.chartDate = '2026-11-13';
+    api.bookRecorder.viewAt('2026-11-13 15:00:00'); await wait(30);
+    assert.deepEqual(activeRows(w).map(row => row.querySelector('dd').textContent), ['3', '2']);
+    assert.equal(w.document.querySelector('#bookSideBid [data-field="volume"] dd').textContent, '5');
+    assert.equal(w.document.querySelector('#bookSideBid [data-field="added"] dd').textContent, '22');
+    assert.equal(w.document.querySelector('#bookSideAsk [data-field="cancelled"] dd').textContent, '7');
+    assert.equal(w.__bookWaveData.day, '2026-11-13');
+    assert.equal(w.__bookWaveData.windows.reduce((sum, x) => sum + x.volume, 0), 500);
+    assert.equal(w.__bookWaveData.windows.reduce((sum, x) => sum + x.bidAdded, 0), 2200);
+    assert.equal(w.__bookWaveData.windows.reduce((sum, x) => sum + x.askCancelled, 0), 700);
+    assert.ok(Number(w.document.getElementById('bookWavePanel').dataset.points) > 0);
+    assert.ok(w.document.getElementById('bookFlowAt').textContent.includes('2026/11/13'));
+    const request = w.indexedDB.open('thsdk-orderbook-recorder-v1', 1);
+    const db = await new Promise((ok, no) => { request.onsuccess = () => ok(request.result); request.onerror = () => no(request.error); });
+    const read = db.transaction('latest').objectStore('latest').get('stats-session:600000');
+    const saved = await new Promise((ok, no) => { read.onsuccess = () => ok(read.result); read.onerror = () => no(read.error); });
+    assert.equal(saved.session.day, '2026-11-14', 'read-only history cannot replace the current recording session');
+    db.close();
+    api.state.chartDate = '2026-11-12'; api.bookRecorder.viewAt('2026-11-12 15:00:00'); await wait(25);
+    assert.deepEqual(activeRows(w).map(row => row.querySelector('dd').textContent), ['—', '—']);
+    assert.equal(w.__bookWaveData.windows.length, 0, 'another date cannot borrow Friday records');
+    api.state.chartDate = '2026-11-13'; api.bookRecorder.viewAt('2026-11-13 09:30:01'); await wait(25);
+    assert.deepEqual(activeRows(w).map(row => row.querySelector('dd').textContent), ['0', '0'], 'historical selection still cannot use later received trades');
+  } finally { dom.window.close(); }
+});

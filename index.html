@@ -1334,10 +1334,11 @@ const bookRecorder = (() => {
     const c = { events, ticks: new Map(ticks.map(t => [t.id, t])), dirty: true, computed: 0, result: null };
     caches.set(code, c); return c;
   }
-  function recompute(code, force = false, cutoff = Infinity) {
-    const c = caches.get(code), session = sessions.get(code); if (!c || !session) return null;
+  function recompute(code, force = false, cutoff = Infinity, viewSession = null) {
+    const c = caches.get(code), session = viewSession || sessions.get(code); if (!c || !session) return null;
     const marker = DerivedRateReset.cutoff(code, session.day);
-    if (force || c.dirty || !c.result || c.cutoff !== cutoff || c.rateMarker !== marker) {
+    const sessionKey = JSON.stringify([session.id, session.started_at, session.day]);
+    if (force || c.dirty || !c.result || c.cutoff !== cutoff || c.rateMarker !== marker || c.resultSession !== sessionKey) {
       const rateSession = DerivedRateReset.sessionFor(session, marker), ticks = [...c.ticks.values()];
       c.result = BookThreeSecondCalculator.calculate(c.events, ticks, rateSession, cutoff);
       c.result.integrity_audit = BookStatisticsAudit.calculate(c.events, ticks, rateSession, c.result);
@@ -1348,7 +1349,7 @@ const bookRecorder = (() => {
         c.result.visibility_changes = full.visibility_changes.map(row => Date.parse(row.source_span_start) < Date.parse(rateSession.started_at) ? { ...row, statistics_eligible: false } : row);
         c.result.snapshots = full.snapshots;
       }
-      c.dirty = false; c.computed = Date.now(); c.cutoff = cutoff; c.rateMarker = marker;
+      c.dirty = false; c.computed = Date.now(); c.cutoff = cutoff; c.rateMarker = marker; c.resultSession = sessionKey;
     }
     return c.result;
   }
@@ -1375,6 +1376,11 @@ const bookRecorder = (() => {
     for (const e of c.events) { const s = e.session; if ((e.kind === 'stats_start' || e.kind === 'stats_resume') && s?.id && s.code === code && s.day === day && depthCount.has(s.id) && !seen.has(s.id)) seen.set(s.id, s); }
     return [...seen.values()].sort((a, b) => depthCount.get(b.id) - depthCount.get(a.id) || Date.parse(a.started_at) - Date.parse(b.started_at))[0] || null;
   }
+  function bookViewSession(code, day) {
+    const current = sessions.get(code), c = caches.get(code);
+    if (current?.day === day) return current;
+    return c ? waveSessionFor(c, code, day) : null;
+  }
   function waveResultFor(c, session) {
     const marker = DerivedRateReset.cutoff(session.code, session.day), s = DerivedRateReset.sessionFor(session, marker);
     let eventCount = 0;
@@ -1388,17 +1394,12 @@ const bookRecorder = (() => {
   function publishBookWaves() {
     const code = state.code, today = dayShanghai(), day = state.chartDate || today, c = code ? caches.get(code) : null;
     let session = null, result = null, live = false;
-    if (c && day === today) {
-      const current = sessions.get(code);
-      if (current && current.day === day) {
-        live = true;
-        if (viewTime && wavePublished.startsWith(JSON.stringify([code, day, current.id]).slice(0, -1) + ',')) return;
-        if (!viewTime && !c.dirty && c.cutoff === Infinity && c.result) { result = c.result; session = DerivedRateReset.sessionFor(current, c.rateMarker); }
-        else ({ result, session } = waveResultFor(c, current));
-      }
-    } else if (c) {
-      const past = waveSessionFor(c, code, day);
-      if (past) ({ result, session } = waveResultFor(c, past));
+    const chosen = bookViewSession(code, day);
+    if (c && chosen) {
+      live = day === today && chosen.id === sessions.get(code)?.id;
+      const expectedKey = JSON.stringify([chosen.id, chosen.started_at, chosen.day]);
+      if (!c.dirty && c.cutoff === Infinity && c.result && c.resultSession === expectedKey) { result = c.result; session = DerivedRateReset.sessionFor(chosen, c.rateMarker); }
+      else ({ result, session } = waveResultFor(c, chosen));
     }
     const windows = (result?.windows || []).map(w => ({ start: Date.parse(w.start), end: Date.parse(w.end), spans: (w.matched_intervals || []).map(x => [Date.parse(x.start), Date.parse(x.end)]), volume: w.source_trade_volume_shares, activeBuy: w.active_buy_shares, activeSell: w.active_sell_shares, bidAdded: w.bid?.added_shares, bidCancelled: w.bid?.cancellation_shares, bidNet: w.bid?.net_change_shares, askAdded: w.ask?.added_shares, askCancelled: w.ask?.cancellation_shares, askNet: w.ask?.net_change_shares }));
     const last = windows.at(-1), key = JSON.stringify([code, day, session?.id || '', session?.started_at || '', windows.length, last?.end || 0, last?.volume || 0]);
@@ -1412,12 +1413,13 @@ const bookRecorder = (() => {
     renderStatsCore();
     try { publishBookWaves(); } catch (e) { console.warn('波动图数据整理失败', e); }
   }
-  window.__bookWaveRefresh = () => { const code = state.code; if (!code) return; cacheFor(code).then(() => { if (state.code === code) { try { publishBookWaves(); } catch (e) { console.warn('波动图数据整理失败', e); } } }).catch(() => {}); };
+  window.__bookWaveRefresh = () => { const code = state.code; if (!code) return; cacheFor(code).then(() => { if (state.code === code) renderStats(); }).catch(() => {}); };
   function renderStatsCore() {
-    const code = state.code, session = sessions.get(code), selected = viewTime;
+    const code = state.code, selected = viewTime;
     const normalized = selected ? normalizeChartTime(selected) : null;
+    const day = normalized?.slice(0, 10) || state.chartDate || dayShanghai(), session = bookViewSession(code, day);
     const cutoff = normalized ? Date.parse(normalized.replace(' ', 'T') + '+08:00') : Date.now();
-    const result = recompute(code, false, selected ? cutoff : Infinity);
+    const result = session ? recompute(code, false, selected ? cutoff : Infinity, session) : null;
     const noData = message => {
       $('bookFlowAt').textContent = message;
       $('bookFlowBid').textContent = '买盘累计撤单率：—'; $('bookFlowAsk').textContent = '卖盘累计撤单率：—'; const activeBidNode=$('bookFlowBidActive'), activeAskNode=$('bookFlowAskActive'); if(activeBidNode) activeBidNode.textContent='主动买入（手）：—'; if(activeAskNode) activeAskNode.textContent='主动卖出（手）：—';
@@ -1426,7 +1428,7 @@ const bookRecorder = (() => {
       renderThreeSecond(null,cutoff,null,true);
       renderAudit(null,cutoff);
     };
-    if (!session) { noData('查询后从启动时刻累计；不补造启动前的五档。'); return; }
+    if (!session) { noData(`${day}：本机没有该日可用观测会话；不使用其他日期的记录代替。`); return; }
     const at = selected ? `所选 ${normalized}（北京）` : '最新累计';
     if (!Number.isFinite(cutoff) || cutoff < Date.parse(session.started_at) || (normalized && normalized.slice(0, 10) !== session.day)) {
       noData(`${at}：早于本次启动或不在本次交易日，无本次统计。启动于 ${tickSourceTime(session.started_at)}。`); return;
@@ -1694,6 +1696,6 @@ window.addEventListener('blur',()=>{if(chartGesture)finishChartGesture();else if
 // Tap toggling happens only on pointerup, never on the synthetic click after a swipe.
 </script>
 
-	<script src="./ui-parity.js?v=7dd4023c5de58ffd"></script>
+	<script src="./ui-parity.js?v=2f8341af72d7a5ff"></script>
 </body>
 </html>

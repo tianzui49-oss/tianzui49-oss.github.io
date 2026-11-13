@@ -169,7 +169,6 @@
       const cell = make('div', 'book-wave-cell'); cell.dataset.kind = kind;
       const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: 'none', role: 'img', 'aria-label': name });
       svg.append(svgEl('rect', { x: 0, y: 0, width: W, height: H, fill: '#fff' }));
-      if (kind !== 'active') for (const y of [Q, MID + Q]) svg.append(svgEl('line', { class: 'book-wave-start', x1: 0, y1: y, x2: W, y2: y, stroke: '#b8c0cc', 'stroke-width': 1, 'stroke-dasharray': '4 3', 'vector-effect': 'non-scaling-stroke' }));
       const layer = svgEl('g', { class: 'book-wave-data' });
       const zero = svgEl('line', { class: 'book-wave-zero', x1: 0, y1: MID, x2: W, y2: MID, stroke: '#111', 'stroke-width': 1.5, 'vector-effect': 'non-scaling-stroke' });
       const cross = svgEl('line', { class: 'book-wave-cross', x1: 0, y1: 0, x2: 0, y2: H, stroke: '#444', 'stroke-width': 1, 'stroke-dasharray': '4 3', 'vector-effect': 'non-scaling-stroke', display: 'none' });
@@ -183,7 +182,7 @@
     grid.append(tip);
     const legend = make('p', 'small book-wave-legend');
     const swatch = (color, dashed) => { const s = make('span', 'book-wave-swatch'); s.style.background = dashed ? 'repeating-linear-gradient(90deg,#b8c0cc 0 4px,transparent 4px 7px)' : color; return s; };
-    legend.append(swatch(RED), '红线＝买盘（黑线上方）　', swatch(GREEN), '绿线＝卖盘（黑线下方）　', swatch('', true), '浅灰虚线＝起点。',
+    legend.append(swatch(RED), '红线＝买盘（黑线上方）　', swatch(GREEN), '绿线＝卖盘（黑线下方）。',
       make('br'), '加单、撤单图：线在起点上方＝近1分钟比开始观测以来的平均多，下方＝比平均少；净加单图：从开始观测累计（加单−撤单）；主动买卖图：每根柱为1分钟，红柱＝主动买入，绿柱＝主动卖出。滑动图表查看该时刻详情。');
     section.append(title, status, grid, legend);
 
@@ -196,26 +195,19 @@
       const started = Date.parse(data?.started_at);
       const t0 = Number.isFinite(started) ? Math.max(open, started) : firstSpan ? firstSpan[0] : Number.isFinite(rows[0].start) ? rows[0].start : rows[0].end;
       const zeroDev = Object.fromEntries(KEYS.map(k => [k, 0]));
-      const pts = [{ t: open, dev: zeroDev, net: { bid: 0, ask: 0 }, hold: true }, { t: t0, dev: zeroDev, net: { bid: 0, ask: 0 }, hold: true }], real = [], parts = [], coverage = [];
+      const anchors = [{ t: open, dev: zeroDev, net: { bid: 0, ask: 0 }, hold: true }, { t: t0, dev: zeroDev, net: { bid: 0, ask: 0 }, hold: true }], real = [], parts = [], coverage = [];
       const cum = { obs: 0, bidNet: 0, askNet: 0, activeBuy: 0, activeSell: 0, volume: 0, ...zeroDev }, win = { obs: 0, ...zeroDev };
       let covered = t0, j = 0;
       const bars = { buy: new Float64Array(240), sell: new Float64Array(240), has: new Uint8Array(240) };
       rows.forEach((w, i) => {
         const spans = (w.spans || []).filter(s => Number.isFinite(s[0]) && Number.isFinite(s[1]) && s[1] >= s[0]).sort((a, b) => a[0] - b[0]);
         let observed = 0;
-        const prev = pts[pts.length - 1];
         for (const [a, b] of spans) {
           const lastCoverage = coverage[coverage.length - 1];
           if (lastCoverage && a <= lastCoverage[1]) lastCoverage[1] = Math.max(lastCoverage[1], b); else coverage.push([a, b]);
-          if (a > covered && a > prev.t) {
-            const from = Math.max(covered, prev.t);
-            if (from > pts[pts.length - 1].t) pts.push({ t: from, dev: prev.dev, net: prev.net, hold: true });
-            pts.push({ t: a, dev: prev.dev, net: prev.net, hold: true });
-          }
           observed += Math.max(0, b - Math.max(a, covered));
           covered = Math.max(covered, b);
         }
-        if (!spans.length && w.end > prev.t) pts.push({ t: w.end, dev: prev.dev, net: prev.net, hold: true });
         const amount = Object.fromEntries(KEYS.map(k => [k, Number(w[k]) || 0]));
         parts.push({ observed, amount });
         cum.obs += observed; win.obs += observed;
@@ -226,10 +218,43 @@
         cum.bidNet += Number(w.bidNet) || 0; cum.askNet += Number(w.askNet) || 0;
         cum.activeBuy += Number(w.activeBuy) || 0; cum.activeSell += Number(w.activeSell) || 0; cum.volume += Number(w.volume) || 0;
         const point = { t: w.end, w, dev, rate, avg, net: { bid: cum.bidNet, ask: cum.askNet }, cum: { activeBuy: cum.activeBuy, activeSell: cum.activeSell, volume: cum.volume } };
-        pts.push(point); real.push(point);
+        // Queue-flow values belong to the actual snapshot span, not a delayed trade-response arrival.
+        const plotAt = Math.max(anchors[anchors.length - 1].t, spans.length ? Math.min(w.end, spans[spans.length - 1][1]) : w.end);
+        anchors.push({ ...point, t: plotAt }); real.push(point);
         const m = Math.min(239, Math.max(0, Math.ceil(minuteOf(w.end)) - 1));
         bars.buy[m] += Number(w.activeBuy) || 0; bars.sell[m] += Number(w.activeSell) || 0; bars.has[m] = 1;
       });
+      // Interpolate the line only over observed time. Freeze it exactly at each gap's
+      // start/end; do not extend a gap backwards over earlier valid observations.
+      const pts = [anchors[0]];
+      let coverageIndex = 0;
+      for (let i = 1; i < anchors.length; i++) {
+        const a = anchors[i - 1], b = anchors[i], blocks = [];
+        while (coverageIndex < coverage.length && coverage[coverageIndex][1] <= a.t) coverageIndex++;
+        let duration = 0;
+        for (let n = coverageIndex; n < coverage.length && coverage[n][0] < b.t; n++) {
+          const from = Math.max(a.t, coverage[n][0]), to = Math.min(b.t, coverage[n][1]);
+          if (to > from) { blocks.push([from, to]); duration += to - from; }
+        }
+        const interpolate = (t, ratio) => ({ t, hold: true,
+          dev: Object.fromEntries(KEYS.map(k => [k, a.dev[k] + (b.dev[k] - a.dev[k]) * ratio])),
+          net: { bid: a.net.bid + (b.net.bid - a.net.bid) * ratio, ask: a.net.ask + (b.net.ask - a.net.ask) * ratio } });
+        let cursor = a.t, elapsed = 0;
+        for (const [from, to] of blocks) {
+          if (from > cursor) {
+            const ratio = elapsed / duration;
+            if (cursor > pts[pts.length - 1].t) pts.push(interpolate(cursor, ratio));
+            pts.push(interpolate(from, ratio));
+          }
+          elapsed += to - from; cursor = to;
+        }
+        if (cursor < b.t) {
+          const ratio = duration ? elapsed / duration : 0;
+          if (cursor > pts[pts.length - 1].t) pts.push(interpolate(cursor, ratio));
+          pts.push(interpolate(b.t, ratio));
+        }
+        pts.push(b);
+      }
       const last = pts[pts.length - 1];
       if (close > last.t) pts.push({ t: close, dev: last.dev, net: last.net, hold: true });
       return { pts, real, bars, t0, open, coverage };
