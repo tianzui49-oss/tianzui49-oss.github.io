@@ -148,7 +148,7 @@
   // Four detail charts. Reads settled windows published by the page; never recalculates statistics.
   function buildBookWaves() {
     const NS = 'http://www.w3.org/2000/svg', W = 400, H = 240, MID = H / 2, Q = H / 4;
-    const RED = '#d93025', GREEN = '#188038', GAP_MS = 15000, ROLL_MS = 60000;
+    const RED = '#d93025', GREEN = '#188038', ROLL_MS = 60000;
     const KEYS = ['bidAdded', 'askAdded', 'bidCancelled', 'askCancelled'];
     const svgEl = (tag, attrs = {}) => { const n = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v); return n; };
     const minuteOf = t => { const d = new Date(t + 8 * 3600000), m = d.getUTCHours() * 60 + d.getUTCMinutes() + d.getUTCSeconds() / 60 + d.getUTCMilliseconds() / 60000; return m <= 570 ? 0 : m <= 690 ? m - 570 : m < 780 ? 120 : m <= 900 ? m - 660 : 240; };
@@ -190,21 +190,32 @@
     let model = { pts: [], real: [], bars: null, t0: null }, latest = null, drawQueued = false, active = null, lastHover = null;
     function build(data) {
       const rows = (data?.windows || []).filter(w => Number.isFinite(w.end)).sort((a, b) => a.end - b.end);
-      if (!rows.length) return { pts: [], real: [], bars: null, t0: null };
+      const open = Date.parse(`${data?.day}T09:30:00+08:00`), close = Date.parse(`${data?.day}T15:00:00+08:00`);
+      if (!rows.length) return { pts: [], real: [], bars: null, t0: null, open, coverage: [] };
       const firstSpan = (rows[0].spans || []).filter(s => Number.isFinite(s[0])).sort((a, b) => a[0] - b[0])[0];
-      const t0 = firstSpan ? firstSpan[0] : Number.isFinite(rows[0].start) ? rows[0].start : rows[0].end;
+      const started = Date.parse(data?.started_at);
+      const t0 = Number.isFinite(started) ? Math.max(open, started) : firstSpan ? firstSpan[0] : Number.isFinite(rows[0].start) ? rows[0].start : rows[0].end;
       const zeroDev = Object.fromEntries(KEYS.map(k => [k, 0]));
-      const pts = [{ t: t0, dev: zeroDev, net: { bid: 0, ask: 0 } }], real = [], parts = [];
+      const pts = [{ t: open, dev: zeroDev, net: { bid: 0, ask: 0 }, hold: true }, { t: t0, dev: zeroDev, net: { bid: 0, ask: 0 }, hold: true }], real = [], parts = [], coverage = [];
       const cum = { obs: 0, bidNet: 0, askNet: 0, activeBuy: 0, activeSell: 0, volume: 0, ...zeroDev }, win = { obs: 0, ...zeroDev };
       let covered = t0, j = 0;
       const bars = { buy: new Float64Array(240), sell: new Float64Array(240), has: new Uint8Array(240) };
       rows.forEach((w, i) => {
         const spans = (w.spans || []).filter(s => Number.isFinite(s[0]) && Number.isFinite(s[1]) && s[1] >= s[0]).sort((a, b) => a[0] - b[0]);
-        let observed = 0, gapEnd = null;
-        for (const [a, b] of spans.length ? spans : [[w.end, w.end]]) {
-          if (a - covered > GAP_MS) { if (gapEnd === null) gapEnd = a; observed += b - a; } else observed += Math.max(0, b - covered);
+        let observed = 0;
+        const prev = pts[pts.length - 1];
+        for (const [a, b] of spans) {
+          const lastCoverage = coverage[coverage.length - 1];
+          if (lastCoverage && a <= lastCoverage[1]) lastCoverage[1] = Math.max(lastCoverage[1], b); else coverage.push([a, b]);
+          if (a > covered && a > prev.t) {
+            const from = Math.max(covered, prev.t);
+            if (from > pts[pts.length - 1].t) pts.push({ t: from, dev: prev.dev, net: prev.net, hold: true });
+            pts.push({ t: a, dev: prev.dev, net: prev.net, hold: true });
+          }
+          observed += Math.max(0, b - Math.max(a, covered));
           covered = Math.max(covered, b);
         }
+        if (!spans.length && w.end > prev.t) pts.push({ t: w.end, dev: prev.dev, net: prev.net, hold: true });
         const amount = Object.fromEntries(KEYS.map(k => [k, Number(w[k]) || 0]));
         parts.push({ observed, amount });
         cum.obs += observed; win.obs += observed;
@@ -214,14 +225,14 @@
         for (const k of KEYS) { rate[k] = win[k] / Math.max(win.obs, 1000) * ROLL_MS; avg[k] = cum[k] / Math.max(cum.obs, 1000) * ROLL_MS; dev[k] = j === 0 ? 0 : rate[k] - avg[k]; }
         cum.bidNet += Number(w.bidNet) || 0; cum.askNet += Number(w.askNet) || 0;
         cum.activeBuy += Number(w.activeBuy) || 0; cum.activeSell += Number(w.activeSell) || 0; cum.volume += Number(w.volume) || 0;
-        const prev = pts[pts.length - 1];
-        if (gapEnd !== null) pts.push({ t: gapEnd, dev: prev.dev, net: prev.net, hold: true });
         const point = { t: w.end, w, dev, rate, avg, net: { bid: cum.bidNet, ask: cum.askNet }, cum: { activeBuy: cum.activeBuy, activeSell: cum.activeSell, volume: cum.volume } };
         pts.push(point); real.push(point);
         const m = Math.min(239, Math.max(0, Math.ceil(minuteOf(w.end)) - 1));
         bars.buy[m] += Number(w.activeBuy) || 0; bars.sell[m] += Number(w.activeSell) || 0; bars.has[m] = 1;
       });
-      return { pts, real, bars, t0 };
+      const last = pts[pts.length - 1];
+      if (close > last.t) pts.push({ t: close, dev: last.dev, net: last.net, hold: true });
+      return { pts, real, bars, t0, open, coverage };
     }
     function pathFor(pts, value, center, range) {
       let d = '', bucket = null, group = [];
@@ -232,7 +243,7 @@
         for (const p of [...new Set([group[0], lo, hi, group[group.length - 1]])].sort((a, b) => a.i - b.i)) d += (d ? 'L' : 'M') + p.x.toFixed(2) + ' ' + p.y.toFixed(2);
         group = [];
       };
-      pts.forEach((p, i) => { const v = value(p); if (!Number.isFinite(v)) return; const x = xOf(p.t), b = Math.round(x * 2); if (b !== bucket) { flush(); bucket = b; } group.push({ x, y: center - v / range * Q, i }); });
+      pts.forEach((p, i) => { const v = value(p); if (!Number.isFinite(v)) return; const x = xOf(p.t), b = Math.round(x * 2); if (b !== bucket || p.hold) { flush(); bucket = b; } group.push({ x, y: center - v / range * Q, i }); if (p.hold) flush(); });
       flush(); return d;
     }
     function drawLines(panel, bidValue, askValue) {
@@ -293,12 +304,22 @@
     }
     function hide() { tip.hidden = true; for (const p of panels) p.cross.setAttribute('display', 'none'); }
     function show(index, frac, fingerX) {
-      const p = nearest(frac * W); if (!p) { hide(); return; }
+      const p = nearest(frac * W);
       lastHover = { index, frac, fingerX };
-      const x = xOf(p.t).toFixed(2);
+      const mAtFinger = frac * 240;
+      const target = model.open + mAtFinger * 60000 + (mAtFinger >= 120 ? 90 * 60000 : 0);
+      let lo = 0, hi = model.coverage.length;
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (model.coverage[mid][1] < target) lo = mid + 1; else hi = mid; }
+      const observed = p && target >= model.t0 && (model.coverage[lo]?.[0] <= target || Math.abs(target - p.t) <= 1);
+      const x = (observed ? xOf(p.t) : frac * W).toFixed(2);
       for (const panel of panels) { panel.cross.setAttribute('x1', x); panel.cross.setAttribute('x2', x); panel.cross.removeAttribute('display'); }
-      const w = p.w, m = Math.min(239, Math.max(0, Math.ceil(minuteOf(p.t)) - 1)), b = model.bars;
-      const lines = [
+      const w = p?.w, m = p ? Math.min(239, Math.max(0, Math.ceil(minuteOf(p.t)) - 1)) : 0, b = model.bars;
+      const lines = !observed ? [
+        `${clock(target)}（北京时间）· 此时未观测`,
+        !p ? '本日暂无已结算观测记录。' : target < model.t0 ? `尚未开始观测；起点 ${clock(model.t0)}。` : target > model.real[model.real.length - 1].t ? `最后已结算记录 ${clock(model.real[model.real.length - 1].t)}；之后尚无观测结果。` : '观测中断；此时没有可比较的盘口记录。',
+        '水平线仅保持显示位置，不表示成交或挂单变化为0。',
+        '不使用附近记录冒充该时刻的成交、加单或撤单。'
+      ] : [
         `${clock(p.t)}（北京时间）· 本次成交 ${lots(w.volume)} 手`,
         `主动买入 ${lots(w.activeBuy)} 手 · 主动卖出 ${lots(w.activeSell)} 手`,
         `买盘：加单 ${lots(w.bidAdded)} · 撤单 ${lots(w.bidCancelled)} · 净加单 ${signed(w.bidNet)}`,
