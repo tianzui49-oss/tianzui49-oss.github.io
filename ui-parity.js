@@ -188,8 +188,9 @@
         card.append(row);
       }
       const source = byId('bookFlow' + suffix + 'Detail');
+      const activeSource = byId('bookFlow' + suffix + 'Active');
       const additionSource = byId('book' + suffix + 'AdditionDetail');
-      dataBridge.append(source, additionSource);
+      dataBridge.append(source, additionSource, activeSource);
       const dl = make('dl', 'book-side-fields');
       const cells = [];
       for (const [key, labelText, pattern] of fields) {
@@ -198,6 +199,18 @@
         row.append(make('dt', '', labelText), value); dl.append(row);
         cells.push({ value, pattern });
       }
+      const activeRow = make('div');
+      activeRow.dataset.field = suffix === 'Bid' ? 'activeBuy' : 'activeSell';
+      const activeValue = make('dd', '', '—');
+      activeRow.append(make('dt', '', suffix === 'Bid' ? '主动买入（手）' : '主动卖出（手）'), activeValue);
+      const refreshActive = () => {
+        const text = activeSource?.textContent || '';
+        const match = text.match(/：\s*(.+)$/);
+        const displayed = match ? match[1].trim() : '—';
+        if (activeValue.textContent !== displayed) activeValue.textContent = displayed;
+      };
+      if (activeSource) watch(activeSource, refreshActive);
+      dl.append(activeRow);
       // Copy displayed totals from the application's existing result strings; do not recalculate.
       const refresh = () => {
         const fragments = source.textContent.split(/[；。]/).map(text => text.trim());
