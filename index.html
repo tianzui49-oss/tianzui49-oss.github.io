@@ -709,8 +709,8 @@ function tickRowStats(rawRows=[],counts=tickCountRows(rawRows).counts){
   if(!rows.length)return {total:rawRows.length,count:0,skipped:rawRows.length,min:null,max:null,remaining:0,averageLots:null,averageAmount:null};
   // 并列按当前表格顺序取首条最小、末条最大；全相等也只剔除两条不同记录。
   let min=rows[0],max=rows[0];for(const r of rows){if(r.perTradeVolume<min.perTradeVolume)min=r;if(r.perTradeVolume>=max.perTradeVolume)max=r;}
-  const rest=rows.filter(r=>r.index!==min.index&&r.index!==max.index),sum=rest.reduce((s,r)=>({volume:s.volume+r.perTradeVolume,amount:s.amount+r.perTradeVolume*r.price}),{volume:0,amount:0});
-  return {total:rawRows.length,count:rows.length,skipped:rawRows.length-rows.length,min,max,remaining:rest.length,averageLots:rest.length?sum.volume/rest.length/100:null,averageAmount:rest.length?sum.amount/rest.length/10000:null};
+  const rest=rows.filter(r=>r.index!==min.index&&r.index!==max.index),sum=rest.reduce((s,r)=>({volume:s.volume+r.volume,amount:s.amount+r.volume*r.price,count:s.count+r.count}),{volume:0,amount:0,count:0});
+  return {total:rawRows.length,count:rows.length,skipped:rawRows.length-rows.length,min,max,remaining:rest.length,remainingTrades:sum.count,averageLots:sum.count>0?sum.volume/sum.count/100:null,averageAmount:sum.count>0?sum.amount/sum.count/10000:null};
 }
 function tickRenderRowStats(rows=[],counts){
   const stats=tickRowStats(rows,counts),box=$('thsdkRowStats');box.replaceChildren();
@@ -718,7 +718,7 @@ function tickRenderRowStats(rows=[],counts){
   if(!stats.count){line(rows.length?'成交记录统计：暂无价格、成交量及正笔数均有效的记录，无法计算。':'成交记录统计：暂无可用记录。');return;}
   const record=r=>`${fmt(r.perTradeVolume/100)} 手 / ${fmt(r.perTradeVolume*r.price/10000)} 万元（${tickClock(r.row.time)||'时间暂不可用'}；${r.count===1?'1 笔，真实单笔':`${r.count} 笔，折算均笔`}）`;
   line(`折算单笔最大：${record(stats.max)}`);line(`折算单笔最小：${record(stats.min)}`);
-  line(stats.count>=3?`各剔除一条最大、最小后，平均每笔：${fmt(stats.averageLots)} 手 / ${fmt(stats.averageAmount)} 万元（剩余 ${stats.remaining} 条记录的折算值取算术平均）`:'去极值平均：有效记录不足 3 条，暂不计算。');
+  line(stats.count>=3?`各剔除一条最大、最小后，平均每笔：${fmt(stats.averageLots)} 手 / ${fmt(stats.averageAmount)} 万元（剩余 ${stats.remaining} 条聚合记录，按总成交量/总笔数加权，${stats.remainingTrades} 笔）`:'去极值平均：有效记录不足 3 条，暂不计算。');
   line(`仅统计当前明细已加载的 ${stats.total} 条记录；每行手数÷该行笔数＝折算单笔手数，1 笔时保留真实手数；多笔聚合无法还原其中真实单笔极值。按未四舍五入的折算单笔手数选极值；并列按表格顺序取首条最小、末条最大，各只剔除一条。单笔金额＝成交价×成交股数÷笔数÷10000${stats.skipped?`；${stats.skipped} 条价格、成交量或笔数无效（含零笔、未知笔数），未计入统计`:''}。`);
 }
 function tickClear(){ $('thsdkTickHead').replaceChildren();$('thsdkTickBody').replaceChildren();$('thsdkTableWrap').hidden=true;tickLoadedSummary();tickRenderRowStats(); }
@@ -879,244 +879,226 @@ function depthSync(force=false,manual=false){
     depthState.records.set(code,record);try{localStorage.setItem(DEPTH_STORAGE_PREFIX+code,JSON.stringify(record));}catch{}depthShow();
   }).catch(error=>{if(generation===depthState.generation&&code===state.code)note=`读取失败：${error.message}。保留最后有效数据；后续刷新将重试。`;}).finally(()=>{clearTimeout(timeout);if(depthState.controller===controller){depthState.controller=null;depthState.manual=false;}if(generation===depthState.generation&&code===state.code)depthShow(note);});
 }
-/* Live, revisable three-second buckets, not a settlement timer; trade direction stays neutral. */
+/* Adjacent five-level snapshots + event-time trade compensation.
+ * Direction is a quote-based estimate; unavailable evidence remains unknown.
+ * Snapshot times are receive-time proxies, NOT exchange timestamps.
+ * Legacy class name is retained for export/backward integration only. */
 const BookThreeSecondCalculator = (() => {
-  const N = v => typeof v === 'number' ? v : Number(v);
-  const ms = v => { if (typeof v === 'number') return v < 2e11 ? v * 1000 : v; const x = Date.parse(v); return Number.isFinite(x) ? x : NaN; };
+  const VERSION = 11, SIDES = ['bid', 'ask'];
+  const number = v => v === null || v === '' || typeof v === 'boolean' ? NaN : Number(v);
+  const ms = v => {
+    if (typeof v === 'number') return Number.isFinite(v) ? (v < 2e11 ? v * 1000 : v) : NaN;
+    let text = String(v ?? '').trim();
+    if (/^\d{14}$/.test(text)) text = `${text.slice(0,4)}-${text.slice(4,6)}-${text.slice(6,8)}T${text.slice(8,10)}:${text.slice(10,12)}:${text.slice(12,14)}+08:00`;
+    if (/^\d{10}(?:\.\d+)?$/.test(text)) return Number(text) * 1000;
+    if (/^\d{13}$/.test(text)) return Number(text);
+    if (/^\d{4}-\d\d-\d\d[ T]\d\d:\d\d(?::\d\d(?:\.\d+)?)?$/.test(text)) text = text.replace(' ', 'T') + '+08:00';
+    const t = Date.parse(text); return Number.isFinite(t) ? t : NaN;
+  };
   const iso = t => new Date(t).toISOString();
-  const bj = t => new Date(t + 8 * 3600000).toISOString().replace('T', ' ');
-  const day = t => bj(t).slice(0, 10);
-  const minute = t => +bj(t).slice(11, 13) * 60 + +bj(t).slice(14, 16) + +bj(t).slice(17, 19) / 60;
-  const phase = t => { const m = minute(t); return m >= 570 && m <= 690 ? 'am' : m >= 780 && m < 897 ? 'pm' : null; };
-  const local = v => { if (typeof v === 'number') return ms(v); let z = String(v ?? '').trim().replace(' ', 'T'); if (/^\d{4}-\d\d-\d\dT\d\d:\d\d$/.test(z)) z += ':00'; if (!/[zZ]|[+-]\d\d:?\d\d$/.test(z)) z += '+08:00'; const x = Date.parse(z); return Number.isFinite(x) ? x : NaN; };
-
-  function parse(e) {
-    const rows = Array.isArray(e?.payload?.rows) ? e.payload.rows : [], a = { bid: [], ask: [] };
-    for (const r of rows) {
-      if (!r) continue;
-      const s = String(r.side ?? '').toLowerCase(), l = N(r.level), p = N(r.price), v = N(r.volume);
-      if (r.level !== null && typeof r.level !== 'boolean' && r.level !== '' && r.price !== null && typeof r.price !== 'boolean' && r.price !== '' && r.volume !== null && typeof r.volume !== 'boolean' && r.volume !== '' && (s === 'bid' || s === 'ask') && Number.isInteger(l) && l >= 1 && l <= 5 && Number.isFinite(p) && p > 0 && Number.isSafeInteger(v) && v >= 0) a[s].push({ side: s, level: l, price: p, shares: v });
+  const day = t => new Date(t + 28800000).toISOString().slice(0, 10);
+  const phase = t => { const d = new Date(t + 28800000), m = d.getUTCHours()*60+d.getUTCMinutes()+d.getUTCSeconds()/60; return m>=570&&m<=690?'am':m>=780&&m<897?'pm':null; };
+  const key = (side, price) => side + ':' + price;
+  function parse(event) {
+    const rows = Array.isArray(event?.payload?.rows) ? event.payload.rows : [], a = {bid:[],ask:[]};
+    for (const row of rows) {
+      const side=String(row?.side??'').toLowerCase(), level=number(row?.level), price=number(row?.price), shares=number(row?.volume);
+      if (SIDES.includes(side)&&Number.isInteger(level)&&level>=1&&level<=5&&price>0&&Number.isFinite(price)&&Number.isSafeInteger(shares)&&shares>=0) a[side].push({side,level,price,shares});
     }
-    const ok = s => a[s].length === 5 && new Set(a[s].map(x => x.level)).size === 5 && new Set(a[s].map(x => x.price)).size === 5;
-    let valid = rows.length === 10 && ok('bid') && ok('ask');
-    if (valid && Math.max(...a.bid.map(x => x.price)) >= Math.min(...a.ask.map(x => x.price))) valid = false;
-    for (const s of ['bid', 'ask']) a[s].sort((x, y) => x.level - y.level);
-    return { a, valid };
+    for(const side of SIDES) a[side].sort((x,y)=>x.level-y.level);
+    const ordered=side=>a[side].length===5&&new Set(a[side].map(x=>x.level)).size===5&&new Set(a[side].map(x=>x.price)).size===5&&a[side].every((x,i)=>!i||(side==='bid'?a[side][i-1].price>x.price:a[side][i-1].price<x.price));
+    return {a,valid:rows.length===10&&ordered('bid')&&ordered('ask')&&a.bid[0].price<a.ask[0].price};
   }
-
-  const empty = () => ({ added_shares: 0, visible_added_shares: 0, observed_reduction_shares: 0, reduction_shares: 0, cancellation_shares: 0, net_change_shares: 0, denominator_trade_shares: 0, addition_rate_pct: null, reduction_rate_pct: null, rate_pct: null, trade_credit_shares: 0, unexplained_shares: 0, unknown_shares: 0, baseline_shares: 0, active_buy_shares: 0, active_sell_shares: 0 });
-  const finish = m => { const d = m.denominator_trade_shares; m.addition_rate_pct = d > 0 ? m.added_shares / d * 100 : null; m.reduction_rate_pct = d > 0 && m.cancellation_shares !== null ? m.cancellation_shares / d * 100 : null; m.rate_pct = m.reduction_rate_pct; m.unexplained_shares = m.cancellation_shares; m.unknown_shares = m.cancellation_shares; m.reduction_shares = m.cancellation_shares; m.net_change_shares = m.added_shares - m.cancellation_shares; m.net_addition_rate_pct = d > 0 ? m.net_change_shares / d * 100 : null; return m; };
-  function coverage(r, t0, t1, d) { const b = r.payload_metadata?.bounds || {}, rt = ms(r.received_at); if (!Number.isFinite(rt) || rt < t1) return false; if (b.mode === 'available-day') return b.day === d; if (b.mode === 'minute') { const lo = local(b.start), hi = local(b.end); return Number.isFinite(lo) && Number.isFinite(hi) && lo <= t0 && hi >= t1; } return false; }
-
-  function calculate(inputEvents, inputTicks, session, cutoff = Infinity) {
-    const s = session || {}, sid = s.id, code = s.code, targetDay = s.day, sessionStart = ms(s.started_at);
-    const events = (Array.isArray(inputEvents) ? inputEvents : []).filter(e => e && e.session_id === sid).map((e,i)=>({...e,__i:i,__t:ms(e.received_at)})).filter(e=>Number.isFinite(e.__t)&&e.__t<=cutoff&&(!Number.isFinite(sessionStart)||e.__t>=sessionStart)&&(!code||!e.code||e.code===code)&&(!targetDay||day(e.__t)===targetDay)).sort((a,b)=>a.__t-b.__t||a.__i-b.__i);
-    const depths=events.filter(e=>e.kind==='depth'), errors=events.filter(e=>e.kind==='feed_error'), pairs=[], excluded=[], visibilityChanges=[];
-    let prev=null,lastDepth=null; const baseline={bid:0,ask:0}; let hasBaseline=false;
+  const empty = () => ({added_shares:null,visible_added_shares:0,observed_reduction_shares:0,reduction_shares:null,cancellation_shares:null,net_change_shares:null,denominator_trade_shares:0,addition_rate_pct:null,reduction_rate_pct:null,net_addition_rate_pct:null,rate_pct:null,trade_credit_shares:0,executed_shares:0,unknown_shares:0,unexplained_shares:null,baseline_shares:0,eligible_intervals:0,has_estimate:false});
+  function finish(m) {
+    if(m.has_estimate){m.added_shares??=0;m.cancellation_shares??=0;m.net_change_shares=m.added_shares-m.cancellation_shares;}
+    const d=m.denominator_trade_shares;
+    m.addition_rate_pct=m.has_estimate&&d>0?m.added_shares/d*100:null;
+    m.reduction_rate_pct=m.has_estimate&&d>0?m.cancellation_shares/d*100:null;
+    m.net_addition_rate_pct=m.has_estimate&&d>0?m.net_change_shares/d*100:null;
+    m.rate_pct=m.reduction_rate_pct;m.reduction_shares=m.cancellation_shares;
+    // Unknown is not a synonym for cancellation.
+    m.unexplained_shares=null;return m;
+  }
+  function responseCovers(e,t0,t1,targetDay) {
+    if(e.kind!=='tick_response'||e.ok===false||e.success===false||e.payload_metadata?.error||e.__t<t1)return false;
+    const fetched=ms(e.payload_metadata?.fetched_at);if(Number.isFinite(fetched)&&fetched<t1)return false;
+    const bounds=e.payload_metadata?.bounds||{};
+    if(bounds.mode==='available-day')return bounds.day===targetDay;
+    if(bounds.mode==='minute')return ms(bounds.start)<=t0&&ms(bounds.end)>=t1;
+    return false;
+  }
+  function calculate(inputEvents,inputTicks,session,cutoff=Infinity) {
+    const s=session||{},start=ms(s.started_at),sid=s.id,targetDay=s.day;
+    const events=(Array.isArray(inputEvents)?inputEvents:[]).filter(e=>e?.session_id===sid&&(!s.code||!e.code||e.code===s.code)).map((e,i)=>({...e,__t:ms(e.received_at),__i:i})).filter(e=>Number.isFinite(e.__t)&&e.__t<=cutoff&&(!Number.isFinite(start)||e.__t>=start)&&(!targetDay||day(e.__t)===targetDay)).sort((a,b)=>a.__t-b.__t||a.__i-b.__i);
+    const seen=new Set(),trades=[];
+    for(const t of Array.isArray(inputTicks)?inputTicks:[]){
+      const row=t?.row,recv=ms(t?.first_received_at),at=ms(row?.time),price=number(row?.price),volume=number(row?.volume);
+      if(!row||s.code&&t.code!==s.code||!Number.isFinite(recv)||!Number.isFinite(at)||recv>cutoff||at>cutoff||Number.isFinite(start)&&(recv<start||at<start)||targetDay&&day(at)!==targetDay||!phase(at)||!Number.isFinite(price)||price<=0||!Number.isSafeInteger(volume)||volume<0)continue;
+      const id=t.id==null?JSON.stringify([t.code,row]):String(t.id);
+      if(seen.has(id))continue;seen.add(id);trades.push({raw:t,id,at,recv,price,volume});
+    }
+    trades.sort((a,b)=>a.at-b.at||a.recv-b.recv||a.id.localeCompare(b.id));
+    const asOf=trades.reduce((at,t)=>Math.max(at,t.recv),events.reduce((at,e)=>Math.max(at,e.__t),Number.isFinite(start)?start:0));
+    const depths=events.filter(e=>e.kind==='depth'),errors=events.filter(e=>e.kind==='feed_error'&&e.feed==='depth'),pairs=[],excluded=[],visibility=[];
+    const baseline={bid:0,ask:0};let previous=null,hasBaseline=false,lastDepth=null;
     for(const e of depths){
       lastDepth=e.__t;const q=parse(e),ph=phase(e.__t);
-      if(!q.valid||!ph){excluded.push({start:iso(e.__t),end:iso(e.__t),reason:!q.valid?'incomplete_snapshot':'outside_session'});prev=null;continue;}
-      if(!hasBaseline){for(const side of ['bid','ask'])baseline[side]=q.a[side].reduce((n,x)=>n+x.shares,0);hasBaseline=true;}
-      if(prev){const gap=e.__t-prev.e.__t,limit=Math.max(5000,N(e.gap_limit_ms||5000));
-        if(e.segment_id===prev.e.segment_id&&ph===prev.ph&&gap>0&&gap<=limit&&!e.gap_warning&&!errors.some(x=>x.feed==='depth'&&x.__t>prev.e.__t&&x.__t<=e.__t)){
-          const p={t0:prev.e.__t,t1:e.__t,segment_id:e.segment_id,old:prev.q,new:q,details:[]};
-          for(const side of ['bid','ask']){const before=new Map(prev.q.a[side].map(x=>[x.price,x])),after=new Map(q.a[side].map(x=>[x.price,x]));
-            for(const price of new Set([...before.keys(),...after.keys()])){const b=before.get(price),a=after.get(price),delta=b&&a?a.shares-b.shares:null;
-              if(b&&a&&delta===0)continue;
-              const state=b&&a?'in_five_same_price':a?'entered_five':'left_five';
-              const d={id:`${sid}:${p.t0}:${p.t1}:${side}:${price}`,side,price,before_shares:b?b.shares:null,after_shares:a?a.shares:null,delta_shares:delta,before_level:b?b.level:null,after_level:a?a.level:null,visibility_state:state,visibility_label:state==='in_five_same_price'?'同价位仍在五档内':a?'进入五档':'移出五档（外部余量未知）',interval_start:iso(p.t0),interval_end:iso(p.t1),source_span_start:iso(p.t0),source_span_end:iso(p.t1),confirmed_at:iso(p.t1),statistics_eligible:false,observations:[{received_at:iso(p.t1),before_shares:b?b.shares:null,after_shares:a?a.shares:null,delta_shares:delta}]};
-              p.details.push(d);visibilityChanges.push(d);
+      if(!q.valid||!ph){excluded.push({start:iso(e.__t),end:iso(e.__t),reason:q.valid?'outside_session':'incomplete_or_invalid_snapshot'});previous=null;continue;}
+      if(!hasBaseline){for(const side of SIDES)baseline[side]=q.a[side].reduce((sum,x)=>sum+x.shares,0);hasBaseline=true;}
+      if(previous){
+        const dt=e.__t-previous.e.__t,limit=Math.min(45000,Math.max(5000,number(e.gap_limit_ms)||5000));
+        const good=dt>0&&dt<=limit&&e.segment_id===previous.e.segment_id&&ph===previous.ph&&!e.gap_warning&&!errors.some(x=>x.__t>previous.e.__t&&x.__t<=e.__t);
+        if(good){
+          const p={t0:previous.e.__t,t1:e.__t,old:previous.q,new:q,event:e,segment_id:e.segment_id,trades:[],details:[],levels:[]};
+          for(const side of SIDES){const before=new Map(p.old.a[side].map(x=>[x.price,x])),after=new Map(q.a[side].map(x=>[x.price,x]));
+            for(const price of new Set([...before.keys(),...after.keys()])){
+              const b=before.get(price),a=after.get(price),common=!!b&&!!a,delta=common?a.shares-b.shares:null,visibility_state=common?'in_five_same_price':a?'entered_five':'left_five';
+              const z={side,price,before_shares:b?.shares??null,after_shares:a?.shares??null,before_level:b?.level??null,after_level:a?.level??null,delta_shares:delta,visibility_state,statistics_eligible:false,visible_added_shares:common?Math.max(0,delta):0,observed_reduction_shares:common?Math.max(0,-delta):0,added_shares:null,cancellation_shares:null,net_change_shares:null,executed_shares:0,trade_credit_shares:0,observations:[]};
+              p.levels.push(z);
+              if(!common||delta!==0){const d={...z,id:`${sid}:${p.t0}:${p.t1}:${side}:${price}`,interval_start:iso(p.t0),interval_end:iso(p.t1),source_span_start:iso(p.t0),source_span_end:iso(p.t1),confirmed_at:iso(p.t1),visibility_label:common?'同价位仍在五档内':a?'进入五档（不等于新增）':'移出五档（余量未知）',observations:[{received_at:iso(p.t1),before_shares:z.before_shares,after_shares:z.after_shares,delta_shares:delta}]};z.observations=d.observations;p.details.push(d);visibility.push(d);}
             }
           }pairs.push(p);
-        }else excluded.push({start:iso(prev.e.__t),end:iso(e.__t),reason:'sampling_or_segment_gap'});
-      }prev={e,q,ph};
+        }else excluded.push({start:iso(previous.e.__t),end:iso(e.__t),reason:'sampling_or_segment_gap'});
+      }previous={e,q,ph};
     }
-    const valid=t=>t&&t.row&&t.row.price!==null&&t.row.price!==''&&Number.isFinite(N(t.row.price))&&N(t.row.price)>0&&t.row.volume!==null&&t.row.volume!==''&&Number.isSafeInteger(N(t.row.volume))&&N(t.row.volume)>=0;
-    const seen=new Set(),ts=[];
-    for(const [i,t] of (Array.isArray(inputTicks)?inputTicks:[]).entries()){
-      if(!valid(t)||code&&t.code!==code)continue;const recv=ms(t.first_received_at),trade=ms(t.row.time),id=t.id??JSON.stringify([t.code,t.row,i]);
-      if(seen.has(id)||!Number.isFinite(recv)||recv>cutoff||!Number.isFinite(trade)||trade>cutoff||Number.isFinite(sessionStart)&&trade<sessionStart||targetDay&&day(trade)!==targetDay||Number.isFinite(sessionStart)&&recv<sessionStart)continue;
-      seen.add(id);ts.push({raw:t,__recv:recv,__trade:trade,__i:i});
-    }ts.sort((a,b)=>a.__recv-b.__recv||a.__i-b.__i);
-    // New detail rows close an observation interval. Repeated non-empty responses do not.
-    // A successful explicitly empty response is an observable zero-trade update.
-    const updates=new Map();
-    for(const t of ts){if(!updates.has(t.__recv))updates.set(t.__recv,[]);updates.get(t.__recv).push(t);}
-    for(const r of events.filter(e=>e.kind==='tick_response'&&e.row_count===0&&!e.payload_metadata?.error))if(!updates.has(r.__t))updates.set(r.__t,[]);
-    const cumulative={bid:empty(),ask:empty()},timeline=[],windows=[],reconciliation=[];let totalVolume=0,totalActiveBuy=0,totalActiveSell=0,pairIndex=0,priorUpdate=Number.isFinite(sessionStart)?sessionStart:(events[0]?.__t||ts[0]?.__recv||Date.now()),through=priorUpdate;const boundaryTotal={bid:0,ask:0};
-    for(const [end,trades] of [...updates].sort((a,b)=>a[0]-b[0])){
-      const ps=[];while(pairIndex<pairs.length&&pairs[pairIndex].t1<=end)ps.push(pairs[pairIndex++]);
-      const levels=new Map(),metrics={bid:empty(),ask:empty()},boundary={bid:0,ask:0},tradePrices=new Set(trades.filter(t=>N(t.raw.row.volume)>0).map(t=>N(t.raw.row.price)));
-      const level=(side,price)=>{const key=side+':'+price;if(!levels.has(key))levels.set(key,{side,price,added_shares:0,visible_added_shares:0,observed_reduction_shares:0,reduction_shares:0,cancellation_shares:0,trade_credit_shares:0,executed_shares:0,net_change_shares:0,observations:[]});return levels.get(key);};
-      for(const p of ps){for(const side of ['bid','ask'])for(const x of [...p.old.a[side],...p.new.a[side]])level(side,x.price);
-        for(const d of p.details){if(d.delta_shares===null){const remains=p.new.a.bid.some(x=>x.price===d.price)||p.new.a.ask.some(x=>x.price===d.price);if(d.visibility_state==='left_five'&&!remains&&tradePrices.has(d.price)){d.statistics_eligible=true;const z=level(d.side,d.price);z.observed_reduction_shares+=d.before_shares??0;z.observations.push(...d.observations);if(z.before_shares==null)z.before_shares=d.before_shares;z.after_shares=d.after_shares;}else boundary[d.side]+=d.before_shares??d.after_shares;continue;}d.statistics_eligible=true;const z=level(d.side,d.price);z.added_shares+=Math.max(0,d.delta_shares);z.observed_reduction_shares+=Math.max(0,-d.delta_shares);z.observations.push(...d.observations);if(z.before_shares==null)z.before_shares=d.before_shares;z.after_shares=d.after_shares;}
-        for(const price of new Set([...p.old.a.bid,...p.old.a.ask,...p.new.a.bid,...p.new.a.ask].map(x=>x.price))){
-          const oldBid=p.old.a.bid.find(x=>x.price===price),oldAsk=p.old.a.ask.find(x=>x.price===price),newBid=p.new.a.bid.find(x=>x.price===price),newAsk=p.new.a.ask.find(x=>x.price===price);
-          if(oldBid&&!newBid&&newAsk){const z=level('bid',price);z.observed_reduction_shares+=oldBid.shares;const add=level('ask',price);add.added_shares+=newAsk.shares;}
-          if(oldAsk&&!newAsk&&newBid){const z=level('ask',price);z.observed_reduction_shares+=oldAsk.shares;const add=level('bid',price);add.added_shares+=newBid.shares;}
-        }
-      }
-      // Keep the price attached to the side where it was first observed in
-      // this interval. A cross-side move does not erase the original side's
-      // visible reduction; the quantity newly visible on the other side is
-      // a visible addition on that side, not a trade.
-      const priceSides=new Map();
-      for(const p of ps) for(const q of [p.old,p.new]) for(const side of ['bid','ask']) for(const x of q.a[side]) {
-        if(!priceSides.has(x.price))priceSides.set(x.price,[]);
-        priceSides.get(x.price).push({side,at:q===p.old?p.t0:p.t1,shares:x.shares});
-      }
-      const bidPrices=[],askPrices=[];for(const p of ps)for(const q of [p.old,p.new]){bidPrices.push(...q.a.bid.map(x=>x.price));askPrices.push(...q.a.ask.map(x=>x.price));}
-      const bestBid=bidPrices.length?Math.max(...bidPrices):NaN,bestAsk=askPrices.length?Math.min(...askPrices):NaN;
-      const observedTradeSides=trades.map(t=>priceSides.get(N(t.raw.row.price))?.[0]?.side).filter(Boolean);
-      const sweepSide=(price)=>{
-        const appearances=priceSides.get(price);if(appearances)return appearances[0].side;
-        if(Number.isFinite(bestAsk)&&price>=bestAsk)return 'ask';
-        if(Number.isFinite(bestBid)&&price<=bestBid)return 'bid';
-        const buy=observedTradeSides.includes('ask'),sell=observedTradeSides.includes('bid');
-        if(buy&&!sell)return 'ask';if(sell&&!buy)return 'bid';
-        return buy?'ask':'bid';
-      };
-      let activeBuy=0,activeSell=0;
-      for(const t of trades){const price=N(t.raw.row.price),side=sweepSide(price),v=N(t.raw.row.volume);if(side==='ask')activeBuy+=v;else activeSell+=v;const appearances=priceSides.get(price);if(appearances)level(side,price).executed_shares+=v;}
-      const volume=trades.reduce((n,t)=>n+N(t.raw.row.volume),0);if(activeBuy+activeSell!==volume){activeSell+=volume-activeBuy-activeSell;}
-      totalVolume+=volume;totalActiveBuy+=activeBuy;totalActiveSell+=activeSell;
-      for(const z of levels.values()){
-        z.visible_added_shares=z.added_shares;z.added_shares+=Math.max(0,z.executed_shares-z.observed_reduction_shares);z.reduction_shares=z.observed_reduction_shares;z.trade_credit_shares=Math.min(z.observed_reduction_shares,z.executed_shares);z.cancellation_shares=Math.max(0,z.observed_reduction_shares-z.executed_shares);z.net_change_shares=z.added_shares-z.cancellation_shares;z.denominator_trade_shares=volume;finish(z);
-        Object.assign(z,{id:`${sid}:${priorUpdate}:${end}:${z.side}:${z.price}`,session_id:sid,interval_start:iso(priorUpdate),interval_end:iso(end),confirmed_at:iso(end),source_span_start:iso(ps[0]?.t0??priorUpdate),source_span_end:iso(ps.at(-1)?.t1??end),status:'trade_update_settled'});reconciliation.push(z);
-        for(const k of ['added_shares','visible_added_shares','observed_reduction_shares','cancellation_shares','trade_credit_shares'])metrics[z.side][k]+=z[k];
-      }
-      for(const side of ['bid','ask']){const m=metrics[side];m.denominator_trade_shares=volume;m.baseline_shares=baseline[side];m.active_buy_shares=activeBuy;m.active_sell_shares=activeSell;finish(m);for(const k of ['added_shares','visible_added_shares','observed_reduction_shares','cancellation_shares','trade_credit_shares'])cumulative[side][k]+=m[k];cumulative[side].denominator_trade_shares=totalVolume;cumulative[side].baseline_shares=baseline[side];finish(cumulative[side]);boundaryTotal[side]+=boundary[side];}
-      const details=ps.flatMap(p=>p.details),counts={in_five_same_price:0,entered_five:0,left_five:0};for(const d of details)counts[d.visibility_state]++;
-      through=Math.max(through,...ps.map(p=>p.t1));
-      const w={start:iso(priorUpdate),end:iso(end),confirmed_at:iso(end),updated_at:iso(end),window_open:false,revisable:false,trade_coverage:'detail_update_received',included_in_cumulative:true,alignment_status:'settled',matched_intervals:ps.map(p=>({start:iso(p.t0),end:iso(p.t1),included:true})),source_span_start:iso(ps[0]?.t0??priorUpdate),source_span_end:iso(ps.at(-1)?.t1??end),sampling_crosses_boundary:false,bid:metrics.bid,ask:metrics.ask,boundary_shares:boundary,sample_pairs:ps.length,source_trade_rows:trades.length,source_trade_records:trades.map(t=>t.raw),source_trade_volume_shares:volume,active_buy_shares:activeBuy,active_sell_shares:activeSell,visibility_details:details,visibility_counts:counts,levels:[...levels.values()],ambiguous_trade_shares:0,trade_attribution:'all_trade_records_classified_by_observed_or_sweep_side'};
-      windows.push(w);timeline.push({at:iso(end),through:iso(through),source_trade_volume_shares:totalVolume,bid:{...cumulative.bid},ask:{...cumulative.ask},active_buy_shares:totalActiveBuy,active_sell_shares:totalActiveSell,instant:{start:w.start,end:w.end,bid:w.bid,ask:w.ask,active_buy_shares:activeBuy,active_sell_shares:activeSell},confirmed_intervals:windows.length,excluded_intervals:excluded.length,boundary_shares:{...boundaryTotal}});priorUpdate=end;
+    const unmatched=new Map();
+    for(const t of trades){
+      let lo=0,hi=pairs.length;while(lo<hi){const mid=(lo+hi)>>1;if(pairs[mid].t1<t.at)lo=mid+1;else hi=mid;}
+      const p=pairs[lo];
+      if(p&&t.at>p.t0&&t.at<=p.t1)p.trades.push(t);
+      else{const bucket=Math.floor(t.at/60000)*60000;if(!unmatched.has(bucket))unmatched.set(bucket,[]);unmatched.get(bucket).push(t);}
     }
-    const asOf=Math.max(Number.isFinite(sessionStart)?sessionStart:0,...events.map(e=>e.__t),...ts.map(t=>t.__recv));
-    return {as_of:iso(asOf),calculation_mode:'trade_update_cumulative',source_trade_volume_shares:totalVolume,active_buy_shares:totalActiveBuy,active_sell_shares:totalActiveSell,timeline,windows,reconciliation,visibility_changes:visibilityChanges,snapshots:depths.length,pending_intervals:pairs.length-pairIndex,pending_changes:visibilityChanges.filter(d=>!d.statistics_eligible&&d.delta_shares!==null),matched_intervals_count:pairIndex,candidate_intervals:pairs.length,incomplete_intervals:0,excluded_intervals:excluded.length,last_depth_at:lastDepth===null?null:iso(lastDepth),session_started_at:s.started_at||null};
+    const windows=[],decisions=[],reconciliation=[];
+    const responses=events.filter(e=>e.kind==='tick_response'&&e.ok!==false&&e.success!==false&&!e.payload_metadata?.error),lastDayResponse=responses.filter(e=>e.payload_metadata?.bounds?.mode==='available-day'&&e.payload_metadata.bounds.day===targetDay).at(-1),minuteResponses=responses.filter(e=>e.payload_metadata?.bounds?.mode==='minute').reverse();
+    function decision(t,p){
+      let side=null,reason='no_adjacent_book_coverage';const age=p?t.at-p.t0:null;
+      if(p){
+        if(age>5000)reason='pretrade_quote_older_than_5s';
+        else{const matches=SIDES.filter(side=>p.old.a[side].some(x=>x.price===t.price));if(matches.length===1){side=matches[0];reason='pretrade_visible_price_receive_time_proxy';}else reason='price_not_in_pretrade_five';}
+      }
+      return {id:t.id,trade_time:iso(t.at),received_at:iso(t.recv),price:t.price,volume_shares:t.volume,side,active_direction:side==='ask'?'buy':side==='bid'?'sell':'unknown',reason,quote_at:p?iso(p.t0):null,quote_age_ms:age,time_basis:'snapshot_receive_time_proxy',queue_covered:!!(p&&side&&p.new.a[side].some(x=>x.price===t.price))};
+    }
+    function buildWindow(p,ts,t0,t1){
+      const ds=ts.map(t=>decision(t,p)),volume=ts.reduce((n,t)=>n+t.volume,0),buy=ds.filter(d=>d.side==='ask').reduce((n,d)=>n+d.volume_shares,0),sell=ds.filter(d=>d.side==='bid').reduce((n,d)=>n+d.volume_shares,0),unknown=volume-buy-sell;
+      const response=p?(lastDayResponse&&responseCovers(lastDayResponse,t0,t1,targetDay)?lastDayResponse:minuteResponses.find(e=>responseCovers(e,t0,t1,targetDay))):null,responseObserved=!!response||ts.some(t=>t.recv>=t1);
+      const boundaryTrade=ds.filter(d=>d.volume_shares>0&&!d.queue_covered).reduce((n,d)=>n+d.volume_shares,0);
+      const eligible=!!p&&responseObserved&&unknown===0&&boundaryTrade===0;
+      const metadataComplete=!!response&&response.payload_metadata?.history?.complete===true;
+      const reason=!p?'no_book_coverage':!responseObserved?'awaiting_trade_response':unknown?'unknown_trade_direction':boundaryTrade?'trade_queue_left_five':'observed_data_estimate';
+      const byPrice=new Map();for(const d of ds)if(d.side)byPrice.set(key(d.side,d.price),(byPrice.get(key(d.side,d.price))||0)+d.volume_shares);
+      const metrics={bid:empty(),ask:empty()},boundary={bid:0,ask:0};
+      for(const z of p?.levels||[]){
+        const common=z.delta_shares!==null,executed=byPrice.get(key(z.side,z.price))||0;z.executed_shares=executed;
+        z.statistics_eligible=common&&eligible;z.estimate_status=z.statistics_eligible?'observed_data_estimate':common?reason:'five_level_boundary_unknown';
+        if(z.statistics_eligible){const net=z.delta_shares+executed;z.added_shares=Math.max(0,net);z.cancellation_shares=Math.max(0,-net);z.net_change_shares=net;z.trade_credit_shares=Math.min(z.observed_reduction_shares,executed);}
+        if(!common)boundary[z.side]+=z.before_shares??z.after_shares??0;
+        Object.assign(z,{id:`${sid}:${t0}:${t1}:${z.side}:${z.price}`,session_id:sid,interval_start:iso(t0),interval_end:iso(t1),confirmed_at:iso(t1),source_span_start:iso(t0),source_span_end:iso(t1),status:z.estimate_status,denominator_trade_shares:eligible?volume:0,has_estimate:z.statistics_eligible});
+        finish(z);reconciliation.push(z);const m=metrics[z.side];m.visible_added_shares+=z.visible_added_shares;m.observed_reduction_shares+=z.observed_reduction_shares;m.executed_shares+=executed;
+        if(z.statistics_eligible){m.has_estimate=true;m.added_shares=(m.added_shares??0)+z.added_shares;m.cancellation_shares=(m.cancellation_shares??0)+z.cancellation_shares;m.trade_credit_shares+=z.trade_credit_shares;}
+      }
+      for(const side of SIDES){const m=metrics[side];m.denominator_trade_shares=eligible?volume:0;m.eligible_intervals=eligible?1:0;m.baseline_shares=baseline[side];m.unknown_shares=unknown;m.active_buy_shares=buy;m.active_sell_shares=sell;m.estimate_status=reason;finish(m);}
+      for(const d of p?.details||[])d.statistics_eligible=eligible&&d.delta_shares!==null;
+      const counts={in_five_same_price:0,entered_five:0,left_five:0};for(const d of p?.details||[])counts[d.visibility_state]++;
+      const updated=Math.max(t1,...ts.map(t=>t.recv),...(response?[response.__t]:[]));
+      const w={start:iso(t0),end:iso(t1),confirmed_at:iso(t1),updated_at:iso(updated),window_open:!responseObserved,revisable:true,window_kind:p?'adjacent_snapshot':'uncovered_trade',trade_coverage:reason,source_complete:metadataComplete,time_basis:'snapshot_receive_time_proxy',included_in_cumulative:eligible,alignment_status:eligible?'observed_estimate':reason,matched_intervals:p?[{start:iso(t0),end:iso(t1),included:true}]:[],source_span_start:iso(t0),source_span_end:iso(t1),sampling_crosses_boundary:false,bid:metrics.bid,ask:metrics.ask,boundary_shares:boundary,sample_pairs:p?1:0,source_trade_rows:ts.length,source_trade_records:ts.map(t=>t.raw),source_trade_volume_shares:volume,active_buy_shares:buy,active_sell_shares:sell,ambiguous_trade_shares:unknown,uncovered_queue_trade_shares:boundaryTrade,trade_decisions:ds,visibility_details:p?.details||[],visibility_counts:counts,levels:p?.levels||[],trade_attribution:'pretrade_visible_price_estimate_or_unknown'};
+      decisions.push(...ds);windows.push(w);
+    }
+    for(const p of pairs)buildWindow(p,p.trades,p.t0,p.t1);
+    for(const [bucket,ts]of unmatched)buildWindow(null,ts,Math.max(Number.isFinite(start)?start:bucket,bucket),Math.max(...ts.map(t=>t.at)));
+    windows.sort((a,b)=>ms(a.end)-ms(b.end)||ms(a.start)-ms(b.start)||a.window_kind.localeCompare(b.window_kind));
+    const cumulative={bid:empty(),ask:empty()},timeline=[];let total=0,buy=0,sell=0,unknown=0,eligibleCount=0;
+    const boundaryTotal={bid:0,ask:0};
+    for(const w of windows){
+      total+=w.source_trade_volume_shares;buy+=w.active_buy_shares;sell+=w.active_sell_shares;unknown+=w.ambiguous_trade_shares;if(w.included_in_cumulative)eligibleCount++;
+      for(const side of SIDES){const m=cumulative[side],x=w[side];for(const k of ['visible_added_shares','observed_reduction_shares','executed_shares','trade_credit_shares'])m[k]+=x[k];if(x.has_estimate){m.has_estimate=true;m.added_shares=(m.added_shares??0)+x.added_shares;m.cancellation_shares=(m.cancellation_shares??0)+x.cancellation_shares;}m.eligible_intervals+=x.eligible_intervals;m.denominator_trade_shares+=x.denominator_trade_shares;m.baseline_shares=baseline[side];m.unknown_shares=unknown;finish(m);boundaryTotal[side]+=w.boundary_shares[side];}
+      timeline.push({at:w.end,through:w.end,source_trade_volume_shares:total,bid:{...cumulative.bid},ask:{...cumulative.ask},active_buy_shares:buy,active_sell_shares:sell,ambiguous_trade_shares:unknown,eligible_trade_volume_shares:cumulative.bid.denominator_trade_shares,instant:{start:w.start,end:w.end,bid:w.bid,ask:w.ask,active_buy_shares:w.active_buy_shares,active_sell_shares:w.active_sell_shares,ambiguous_trade_shares:w.ambiguous_trade_shares},confirmed_intervals:eligibleCount,excluded_intervals:excluded.length,boundary_shares:{...boundaryTotal}});
+    }
+    return {version:VERSION,as_of:iso(asOf),calculation_mode:'adjacent_snapshot_event_time_estimate',time_basis:'snapshot_receive_time_proxy',source_trade_volume_shares:total,active_buy_shares:buy,active_sell_shares:sell,ambiguous_trade_shares:unknown,eligible_trade_volume_shares:cumulative.bid.denominator_trade_shares,coverage_pct:total>0?cumulative.bid.denominator_trade_shares/total*100:null,timeline,windows,trade_decisions:decisions,reconciliation,visibility_changes:visibility,snapshots:depths.length,pending_intervals:windows.filter(w=>w.window_open&&w.sample_pairs).length,pending_changes:visibility.filter(d=>!d.statistics_eligible&&d.delta_shares!==null),matched_intervals_count:pairs.length,candidate_intervals:pairs.length,incomplete_intervals:windows.filter(w=>!w.included_in_cumulative).length,excluded_intervals:excluded.length,excluded_details:excluded,last_depth_at:lastDepth===null?null:iso(lastDepth),session_started_at:s.started_at||null,limitations:'主动方向为成交前可见价位估计；盘口时间是收到时间近似，非交易所时间。净委托变化只覆盖两帧同价同侧及已收成交，不还原真实新增、撤单总量；源未承诺完整。'};
   }
-  return { calculate };
+  return {calculate,version:VERSION};
 })();
 if (typeof module !== 'undefined') module.exports = BookThreeSecondCalculator;
 if (typeof globalThis !== 'undefined') globalThis.BookThreeSecondCalculator = BookThreeSecondCalculator;
 
-/* Independent trade-update cumulative audit.  It deliberately rebuilds all
- * comparisons from raw depth events; result is evidence to compare, not input. */
+/* Independent invariants: rebuild raw intervals, compare event-time ownership,
+ * direction conservation, queue identities, coverage and cumulative sums. */
 const BookStatisticsAudit = (() => {
-  const num = v => typeof v === 'number' ? v : Number(v);
-  const time = v => {
-    if (typeof v === 'number') return v < 2e11 ? v * 1000 : v;
-    const n = Date.parse(v); return Number.isFinite(n) ? n : NaN;
-  };
-  const iso = n => Number.isFinite(n) ? new Date(n).toISOString() : null;
-  const same = (a,b) => Object.is(a,b) || (Number.isFinite(a)&&Number.isFinite(b)&&a===b);
-  const rowsOf = e => Array.isArray(e?.payload?.rows) ? e.payload.rows : (Array.isArray(e?.rows) ? e.rows : []);
-  function snapshot(e, i) {
-    const at = time(e?.__recv ?? e?.received_at ?? e?.__t ?? e?.fetched_at);
-    const out = { at, i, bid:new Map(), ask:new Map(), raw:rowsOf(e), changes:Array.isArray(e?.changes)?e.changes:null };
-    if (!Number.isFinite(at)) return null;
-    for (const r of out.raw) {
-      const side=String(r?.side??'').toLowerCase(), p=num(r?.price), v=num(r?.volume ?? r?.shares);
-      if ((side==='bid'||side==='ask') && Number.isFinite(p) && p>0 && Number.isFinite(v) && v>=0) {
-        // duplicate prices are not safely attributable; retain the first and mark ambiguous.
-        const m=out[side]; if (m.has(p)) m.set(p, NaN); else m.set(p,v);
-      }
+  const time=v=>typeof v==='number'?(v<2e11?v*1000:v):/^\d{14}$/.test(String(v))?Date.parse(String(v).replace(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/,'$1-$2-$3T$4:$5:$6+08:00')):Date.parse(v);
+  const num=v=>v===null||v===''||typeof v==='boolean'?NaN:Number(v);
+  const same=(a,b)=>a===b||(a==null&&b==null);
+  function calculate(inputEvents,inputTicks,session,result){
+    const s=session||{},r=result||{},start=time(s.started_at),asOf=time(r.as_of),day=t=>new Date(t+28800000).toISOString().slice(0,10);
+    const events=(inputEvents||[]).filter(e=>e?.session_id===s.id&&(!s.code||!e.code||e.code===s.code)&&Number.isFinite(time(e.received_at))&&time(e.received_at)>=start&&time(e.received_at)<=asOf&&(!s.day||day(time(e.received_at))===s.day));
+    const depth=events.filter(e=>e.kind==='depth').sort((a,b)=>time(a.received_at)-time(b.received_at));
+    const seen=new Set(),ticks=[];for(const t of inputTicks||[]){const at=time(t?.row?.time),recv=time(t?.first_received_at),price=num(t?.row?.price),vol=num(t?.row?.volume),id=t?.id==null?JSON.stringify([t?.code,t?.row]):String(t.id),m=Number.isFinite(at)?new Date(at+28800000):null,minute=m?m.getUTCHours()*60+m.getUTCMinutes()+m.getUTCSeconds()/60:0;
+      if(seen.has(id)||s.code&&t.code!==s.code||!Number.isFinite(at)||!Number.isFinite(recv)||at<start||recv<start||at>asOf||recv>asOf||s.day&&day(at)!==s.day||!((minute>=570&&minute<=690)||(minute>=780&&minute<897))||!Number.isFinite(price)||price<=0||!Number.isSafeInteger(vol)||vol<0)continue;
+      seen.add(id);ticks.push({id,at,recv,price,vol,raw:t});
     }
-    out.valid = out.raw.length===10&&out.bid.size===5&&out.ask.size===5&&[...out.bid.values(),...out.ask.values()].every(v=>Number.isSafeInteger(v)&&v>=0)&&Math.max(...out.bid.keys())<Math.min(...out.ask.keys()); out.event=e;
-    return out;
-  }
-  function tickInfo(t, i) {
-    const row=t?.row || t?.raw?.row || t;
-    const recv=time(t?.__recv ?? t?.first_received_at ?? t?.received_at ?? t?.__t);
-    const trade=time(row?.time ?? t?.trade_time);
-    const vol=num(row?.volume ?? row?.shares ?? row?.qty);
-    const price=num(row?.price);
-    return {raw:t, i, recv, trade, vol, price, valid:Number.isFinite(recv)&&Number.isFinite(trade)&&Number.isFinite(vol)&&vol>=0&&Number.isFinite(price)&&price>0};
-  }
-  function responseTimes(events) {
-    return events.map((e,i)=>({e,i,at:time(e?.__recv??e?.received_at??e?.__t),
-      ok:e?.ok!==false && e?.success!==false && !e?.payload_metadata?.error && e?.kind==='tick_response' && e?.row_count===0,
-      rows:Array.isArray(e?.payload?.rows)?e.payload.rows:(Array.isArray(e?.rows)?e.rows:null)}))
-      .filter(x=>x.ok&&Number.isFinite(x.at));
-  }
-  function calculate(events, ticks, session, result) {
-    events=Array.isArray(events)?events:[]; ticks=Array.isArray(ticks)?ticks:[]; session=session||{}; result=result||{};
-    const start=time(session.started_at ?? session.start ?? session.session_start);
-    const asOf=time(result.as_of); const day=t=>new Date(t+28800000).toISOString().slice(0,10); events=events.filter(e=>e.session_id===session.id&&(!session.code||!e.code||e.code===session.code)&&(!session.day||day(time(e.received_at))===session.day)); ticks=ticks.filter(t=>(!session.code||t.code===session.code)&&(!session.day||Number.isFinite(time(t.row?.time))&&day(time(t.row.time))===session.day)); const seen=new Set(); ticks=ticks.filter(t=>{if(t.id==null)return true;if(seen.has(t.id))return false;seen.add(t.id);return true;});
-    const depth=events.filter(e=>e.kind==='depth').map(snapshot).filter(x=>x&&(!Number.isFinite(start)||x.at>=start)&&(!Number.isFinite(asOf)||x.at<=asOf)).sort((a,b)=>a.at-b.at||a.i-b.i);
-    const ti=ticks.map(tickInfo).filter(x=>x.valid&&(!Number.isFinite(start)||x.trade>=start&&x.recv>=start)&&(!Number.isFinite(asOf)||x.recv<=asOf)).sort((a,b)=>a.recv-b.recv||a.i-b.i);
-    // A successful empty response is an update too.  Records sharing a receive
-    // timestamp belong to one update and are never silently discarded.
-    const updates=new Map();
-    for(const x of ti){ const k=x.recv; if(!updates.has(k))updates.set(k,[]); updates.get(k).push(x); }
-    // Some recorders put an empty successful response in ticks rather than events.
-    for(const t of ticks){ const at=time(t?.__recv??t?.first_received_at??t?.received_at); const empty=Array.isArray(t?.rows)&&t.rows.length===0; if(empty&&Number.isFinite(at)&&(!Number.isFinite(start)||at>=start)&&(!Number.isFinite(asOf)||at<=asOf)&&!updates.has(at))updates.set(at,[]); }
-    for(const x of responseTimes(events)) { if(Number.isFinite(asOf)&&x.at>asOf)continue; if(Number.isFinite(start)&&x.at<start)continue; if(!updates.has(x.at))updates.set(x.at,[]); }
-    const uts=[...updates.keys()].sort((a,b)=>a-b);
-    const sourceAt = (end) => ti.filter(x=>x.recv===end); // exact response/update ownership
-    const emptySide=()=>({levels:[],A:0,R:0,T:0,add:0,reduction:0,cancel:0,net:0});
-    const comparePairs=(lo,hi) => {
-      const pairs=[];
-      for(let j=1;j<depth.length;j++) if(depth[j].at>lo&&depth[j].at<=hi&&depth[j-1].at<=hi) {
-        const curEvent=depth[j].event, oldEvent=depth[j-1].event, gap=depth[j].at-depth[j-1].at; const phase=t=>{const d=new Date(t+28800000),m=d.getUTCHours()*60+d.getUTCMinutes()+d.getUTCSeconds()/60;return m>=570&&m<=690?'am':m>=780&&m<897?'pm':null;};
-        if(!depth[j].valid||!depth[j-1].valid||curEvent.segment_id!==oldEvent.segment_id||gap<=0||gap>Math.max(5000,num(curEvent.gap_limit_ms||5000))||curEvent.gap_warning||!phase(depth[j].at)||phase(depth[j].at)!==phase(depth[j-1].at)||events.some(e=>e.kind==='feed_error'&&e.feed==='depth'&&time(e.received_at)>depth[j-1].at&&time(e.received_at)<=depth[j].at))continue;
-        const old=depth[j-1], cur=depth[j], by={bid:new Map(),ask:new Map()};
-        for(const side of ['bid','ask']) for(const [p,b] of old[side]) if(cur[side].has(p)) {
-          const a=cur[side].get(p); if(!Number.isFinite(b)||!Number.isFinite(a))continue;
-          const d=a-b; if(!d)continue; by[side].set(p,(by[side].get(p)||0)+d);
+    function map(e,side){const out=new Map();for(const x of e?.payload?.rows||[])if(x.side===side)out.set(Number(x.price),Number(x.volume));return out;}
+    const fields=['bid_added_shares','bid_reduced_shares','ask_added_shares','ask_reduced_shares','source_trade_volume_shares'],sum={bid_added_shares:0,bid_reduced_shares:0,ask_added_shares:0,ask_reduced_shares:0,source_trade_volume_shares:0};
+    ticks.sort((a,b)=>a.at-b.at||a.id.localeCompare(b.id));
+    const tickById=new Map(ticks.map(t=>[t.id,t])),depthByTime=new Map(depth.map((e,i)=>[time(e.received_at),{event:e,index:i}])),timelineByWindow=new Map((r.timeline||[]).map(point=>[point.instant?.start+'|'+point.at,point]));
+    const upperBound=at=>{let lo=0,hi=ticks.length;while(lo<hi){const mid=(lo+hi)>>1;if(ticks[mid].at<=at)lo=mid+1;else hi=mid;}return lo;};
+    const audit=[],claimed=new Set();
+    for(const w of r.windows||[]){
+      const lo=time(w.start),hi=time(w.end),oldInfo=depthByTime.get(lo),curInfo=depthByTime.get(hi),old=oldInfo?.event,cur=curInfo?.event,isPair=w.window_kind==='adjacent_snapshot',issues=[],delta={},raw={};let mismatch=false;
+      function check(ok,message){if(!ok){mismatch=true;issues.push(message);}}
+      const source=isPair?ticks.slice(upperBound(lo),upperBound(hi)):(w.source_trade_records||[]).map(x=>tickById.get(x.id==null?JSON.stringify([x.code,x.row]):String(x.id))).filter(Boolean);
+      const volume=source.reduce((n,t)=>n+t.vol,0);raw.source_trade_volume_shares=volume;check(volume===w.source_trade_volume_shares,'成交量与原始记录不一致');
+      for(const t of source){check(!claimed.has(t.id),'同一成交被重复归入区间');claimed.add(t.id);}
+      const ds=w.trade_decisions||[],directions={buy:0,sell:0,unknown:0};for(const d of ds)directions[d.active_direction]=(directions[d.active_direction]||0)+d.volume_shares;
+      check(directions.buy===w.active_buy_shares&&directions.sell===w.active_sell_shares&&directions.unknown===w.ambiguous_trade_shares,'主动买卖及未知明细合计不一致');
+      check(w.active_buy_shares+w.active_sell_shares+w.ambiguous_trade_shares===volume,'买＋卖＋未知不等于原始成交量');
+      check(ds.length===source.length,'成交归类记录数量不一致');
+      if(isPair){check(!!old&&!!cur,'相邻原始快照缺失');if(old&&cur){const ordered=curInfo.index-oldInfo.index===1;check(ordered,'盘口并非相邻快照');check(old.segment_id===cur.segment_id&&!cur.gap_warning&&hi>lo&&hi-lo<=Math.min(45000,Math.max(5000,Number(cur.gap_limit_ms)||5000)),'跨采集段或采样缺口被统计');}}
+      const expectedQueueCovered=d=>!!(isPair&&d.side&&map(cur,d.side).has(d.price));
+      const unknownFromDetails=ds.filter(d=>d.side===null).reduce((n,d)=>n+d.volume_shares,0),boundaryFromDetails=ds.filter(d=>d.volume_shares>0&&!expectedQueueCovered(d)).reduce((n,d)=>n+d.volume_shares,0);
+      check(unknownFromDetails===w.ambiguous_trade_shares&&boundaryFromDetails===w.uncovered_queue_trade_shares,'方向未知或队列覆盖数量不一致');
+      for(const d of ds){const t=tickById.get(d.id);check(!!t,'归类明细找不到原始成交');if(!t)continue;check(time(d.trade_time)===t.at&&d.volume_shares===t.vol&&d.price===t.price,'成交时间、价格或数量被改变');
+        let expected=null;if(isPair&&old&&t.at>lo&&t.at-lo<=5000){const sides=['bid','ask'].filter(side=>map(old,side).has(t.price));if(sides.length===1)expected=sides[0];}
+        check(d.side===expected,'方向未遵循成交前可见价位估计规则');
+        check(d.active_direction===(expected==='ask'?'buy':expected==='bid'?'sell':'unknown'),'盘口侧和主动方向标签不一致');check(d.queue_covered===expectedQueueCovered(d),'成交队列覆盖标记不一致');
+      }
+      for(const side of ['bid','ask']){
+        const before=map(old,side),after=map(cur,side);let adds=0,cancels=0;
+        const expectedPrices=new Set(isPair?[...before.keys(),...after.keys()]:[]),actualLevels=(w.levels||[]).filter(z=>z.side===side);
+        check(actualLevels.length===expectedPrices.size&&new Set(actualLevels.map(z=>z.price)).size===actualLevels.length&&actualLevels.every(z=>expectedPrices.has(z.price)),'逐价明细存在遗漏、重复或额外价格');
+        for(const z of actualLevels){
+          const common=before.has(z.price)&&after.has(z.price),diff=common?after.get(z.price)-before.get(z.price):null;
+          check(z.delta_shares===diff,'价位变化与原始快照不一致');
+          check(common||!z.statistics_eligible,'进入/移出五档被错误计入净委托');
+          const executed=ds.filter(d=>d.side===side&&d.price===z.price).reduce((n,d)=>n+d.volume_shares,0);
+          check(z.executed_shares===executed,'价位成交补偿不一致');
+          if(z.statistics_eligible){const net=diff+executed;check(z.net_change_shares===net&&z.added_shares===Math.max(0,net)&&z.cancellation_shares===Math.max(0,-net),'净委托恒等式不成立');adds+=Math.max(0,net);cancels+=Math.max(0,-net);}
+          else check(z.added_shares===null&&z.cancellation_shares===null&&z.net_change_shares===null,'未覆盖价位被输出确定估计值');
         }
-        pairs.push({start:iso(old.at),end:iso(cur.at),start_ms:old.at,end_ms:cur.at,by,old,cur});
+        const m=w[side]||{},has=(w.levels||[]).some(z=>z.side===side&&z.statistics_eligible);
+        raw[side+'_added_shares']=has?adds:null;raw[side+'_reduced_shares']=has?cancels:null;
+        check(same(m.added_shares,raw[side+'_added_shares'])&&same(m.cancellation_shares,raw[side+'_reduced_shares']),'盘口侧汇总与逐价重算不一致');
+        check(same(m.net_change_shares,has?adds-cancels:null),'盘口侧净委托与逐价合计不一致');
+        check(m.denominator_trade_shares===(w.included_in_cumulative?volume:0),'分子分母覆盖不一致');
+        if(!isPair||w.ambiguous_trade_shares>0||w.uncovered_queue_trade_shares>0||w.window_open)check(!w.included_in_cumulative,'资料不足区间被计入比率');
+        for(const [rateField,amountField]of [['addition_rate_pct','added_shares'],['reduction_rate_pct','cancellation_shares'],['net_addition_rate_pct','net_change_shares']]){const expectedRate=m.has_estimate&&m.denominator_trade_shares>0?m[amountField]/m.denominator_trade_shares*100:null;check(same(m[rateField],expectedRate),'比率计算不一致：'+rateField);}
+        for(const k of ['added_shares','reduced_shares']){const metric=k==='added_shares'?'added_shares':'cancellation_shares',value=m[metric];delta[side+'_'+k]=same(value,raw[side+'_'+k])?0:Number.isFinite(value)&&Number.isFinite(raw[side+'_'+k])?value-raw[side+'_'+k]:null;}
       }
-      return pairs;
-    };
-    const windows=[]; let prev=Number.isFinite(start)?start:(uts.length?uts[0]:NaN);
-    const cumulative={bid:emptySide(),ask:emptySide(),source:0};
-    for(const end of uts){
-      const source=sourceAt(end), pairs=comparePairs(prev,end), levels={bid:new Map(),ask:new Map()};
-      for(const p of pairs) for(const side of ['bid','ask']) for(const [price,d] of p.by[side]) {
-        const z=levels[side].get(price)||{side,price,A:0,R:0,T:0,net:0,observations:[]};
-        if(d>0)z.A+=d; else z.R+=-d; z.observations.push({start:p.start,end:p.end,delta:d}); levels[side].set(price,z);
-      }
-      for(const p of pairs) for(const price of new Set([...p.old.bid.keys(),...p.old.ask.keys(),...p.cur.bid.keys(),...p.cur.ask.keys()])) {
-        const oldBid=p.old.bid.get(price),oldAsk=p.old.ask.get(price),newBid=p.cur.bid.get(price),newAsk=p.cur.ask.get(price);
-        if(Number.isFinite(oldBid)&&!Number.isFinite(newBid)&&Number.isFinite(newAsk)){const z=levels.bid.get(price)||{side:'bid',price,A:0,R:0,T:0,net:0,observations:[]};z.R+=oldBid;levels.bid.set(price,z);const add=levels.ask.get(price)||{side:'ask',price,A:0,R:0,T:0,net:0,observations:[]};add.A+=newAsk;levels.ask.set(price,add);}
-        if(Number.isFinite(oldAsk)&&!Number.isFinite(newAsk)&&Number.isFinite(newBid)){const z=levels.ask.get(price)||{side:'ask',price,A:0,R:0,T:0,net:0,observations:[]};z.R+=oldAsk;levels.ask.set(price,z);const add=levels.bid.get(price)||{side:'bid',price,A:0,R:0,T:0,net:0,observations:[]};add.A+=newBid;levels.bid.set(price,add);}
-      }
-      const tradePrices=new Set(source.filter(x=>x.vol>0).map(x=>x.price)), settledGone=new Set();
-      for(const p of pairs) for(const side of ['bid','ask']) for(const [price,oldShares] of p.old[side]) {
-        if(!tradePrices.has(price)||settledGone.has(side+':'+price)||p.cur.bid.has(price)||p.cur.ask.has(price))continue;
-        const z=levels[side].get(price)||{side,price,A:0,R:0,T:0,net:0,observations:[]};z.R+=oldShares;levels[side].set(price,z);settledGone.add(side+':'+price);
-      }
-      // Match the production rule: retain the original side across a
-      // cross-side move; the opposite-side visible quantity is a new
-      // addition, while trades remain attributed only from trade records.
-      for(const x of source){
-        const appearances=[];
-        for(const p of pairs) for(const q of [p.old,p.cur]) for(const s of ['bid','ask']) if(Number.isFinite(q[s].get(x.price))) appearances.push({side:s,at:q===p.old?p.start_ms:p.end_ms});
-        const first=appearances[0];
-        if(first){ const z=levels[first.side].get(x.price)||{side:first.side,price:x.price,A:0,R:0,T:0,net:0,observations:[]}; z.T+=x.vol; levels[first.side].set(x.price,z); }
-      }
-      const sideOut={}; for(const side of ['bid','ask']) { const q=emptySide(); q.levels=[...levels[side].values()].map(z=>{z.visibleA=z.A;z.A+=Math.max(0,z.T-z.R);z.cancel=Math.max(0,z.R-z.T);z.net=z.A-z.cancel;return z;}); for(const z of q.levels){q.A+=z.A;q.R+=z.R;q.T+=z.T;q.cancel+=z.cancel;q.net+=z.net;} q.add=q.A;q.reduction=q.R;q.cancellation=q.cancel; sideOut[side]=q; }
-      const volume=source.reduce((n,x)=>n+x.vol,0), raw={bid:sideOut.bid,ask:sideOut.ask,source_trade_records:source.map(x=>x.raw),source_trade_volume_shares:volume,levels:sideOut};
-      const delta={bid_added_shares:sideOut.bid.A,bid_reduced_shares:sideOut.bid.R,bid_trade_shares:sideOut.bid.T,bid_cancellation_shares:sideOut.bid.cancel,bid_net_shares:sideOut.bid.net,ask_added_shares:sideOut.ask.A,ask_reduced_shares:sideOut.ask.R,ask_trade_shares:sideOut.ask.T,ask_cancellation_shares:sideOut.ask.cancel,ask_net_shares:sideOut.ask.net,source_trade_volume_shares:volume};
-      for(const s of ['bid','ask']){for(const k of ['A','R','T','cancel','net'])cumulative[s][k]+=sideOut[s][k];cumulative[s].add=cumulative[s].A;cumulative[s].reduction=cumulative[s].R;cumulative[s].cancellation=cumulative[s].cancel;}
-      cumulative.source+=volume;
-      const matched_intervals=pairs.map(p=>({start:p.start,end:p.end,included:true}));
-      const calc={start:iso(prev),end:iso(end),confirmed_at:iso(end),status:'pass',raw_snapshot_count:pairs.length?pairs.length+1:0,raw_comparisons:pairs.length,raw,delta,cumulative_delta:{bid:{...cumulative.bid},ask:{...cumulative.ask},source_trade_volume_shares:cumulative.source},matched_intervals,source_trade_records:source.map(x=>x.raw),levels:sideOut,issues:[]};
-      const supplied=(result.windows||[]).find(w=>iso(time(w.end))===iso(end)) || (result.windows||[])[windows.length];
-      const issues=[]; for(const p of pairs) if(p.cur.changes){ const expected=[]; for(const s of ['bid','ask']){ for(const [price,b] of p.old[s]){const a=p.cur[s].get(price);if(!p.cur[s].has(price))expected.push([s,price,b,null]);else if(Number.isFinite(a)&&a!==b)expected.push([s,price,b,a]);} for(const [price,a] of p.cur[s])if(!p.old[s].has(price))expected.push([s,price,null,a]); } const got=p.cur.changes.map(x=>[String(x.side||'').toLowerCase(),num(x.price),x.before_shares==null?null:num(x.before_shares),x.after_shares==null?null:num(x.after_shares)]); if(got.length!==expected.length||expected.some(x=>!got.some(y=>x[0]===y[0]&&x[1]===y[1]&&same(x[2],y[2])&&same(x[3],y[3]))))issues.push('raw_changes'); }
-      if(supplied){ const n=(v)=>Number(v); const checks=[['source_trade_volume_shares',supplied.source_trade_volume_shares,volume],['bid.added_shares',supplied.bid?.added_shares,sideOut.bid.A],['ask.added_shares',supplied.ask?.added_shares,sideOut.ask.A],['bid.cancellation_shares',supplied.bid?.cancellation_shares ?? supplied.bid?.observed_reduction_shares,sideOut.bid.cancel],['ask.cancellation_shares',supplied.ask?.cancellation_shares ?? supplied.ask?.observed_reduction_shares,sideOut.ask.cancel]]; for(const [k,a,b] of checks)if(a!=null&&(!Number.isFinite(n(a))||n(a)!==b))issues.push(k); if(Array.isArray(supplied.source_trade_records)&&supplied.source_trade_records.length!==source.length)issues.push('source_trade_records'); }
-      const suppliedTimeline=result.timeline?.[windows.length], cd={};
-      for(const side of ['bid','ask']) { delta[side+'_added_shares']=(supplied?.[side]?.added_shares??0)-sideOut[side].A; delta[side+'_reduced_shares']=(supplied?.[side]?.cancellation_shares??0)-sideOut[side].cancel; cd[side+'_added_shares']=(suppliedTimeline?.[side]?.added_shares??0)-cumulative[side].A; cd[side+'_reduced_shares']=(suppliedTimeline?.[side]?.cancellation_shares??0)-cumulative[side].cancel; if(cd[side+'_added_shares']||cd[side+'_reduced_shares'])issues.push(side+'_cumulative'); if(supplied?.[side]?.net_change_shares!==sideOut[side].net)issues.push(side+'_net'); }
-      delta.source_trade_volume_shares=(supplied?.source_trade_volume_shares??0)-volume;cd.source_trade_volume_shares=(suppliedTimeline?.source_trade_volume_shares??0)-cumulative.source;calc.cumulative_delta=cd;if(cd.source_trade_volume_shares)issues.push('cumulative_source');
-      calc.status=issues.length?'mismatch':(pairs.length||source.length?'pass':'incomplete');calc.issues=issues; windows.push(calc);prev=end;
+      if(isPair&&old&&cur&&Array.isArray(cur.changes))for(const c of cur.changes){const a=map(old,c.side),b=map(cur,c.side),expected=a.has(c.price)&&b.has(c.price)?b.get(c.price)-a.get(c.price):null;check(c.delta_shares===expected,'保存变化行与原始快照不一致');}
+      delta.source_trade_volume_shares=w.source_trade_volume_shares-volume;for(const field of fields)sum[field]+=raw[field]??0;
+      const point=timelineByWindow.get(w.start+'|'+w.end),upper={bid_added_shares:point?.bid?.added_shares??0,bid_reduced_shares:point?.bid?.cancellation_shares??0,ask_added_shares:point?.ask?.added_shares??0,ask_reduced_shares:point?.ask?.cancellation_shares??0,source_trade_volume_shares:point?.source_trade_volume_shares??0},cumulative_delta={};
+      for(const field of fields){cumulative_delta[field]=upper[field]-sum[field];check(cumulative_delta[field]===0,'累计量与区间合计不一致：'+field);}
+      const partial=!isPair||!w.included_in_cumulative||w.ambiguous_trade_shares>0||w.visibility_counts?.entered_five>0||w.visibility_counts?.left_five>0||!w.source_complete;
+      if(!isPair)issues.push('无相邻盘口覆盖，成交方向未知');else if(!w.included_in_cumulative)issues.push('区间不具备成交补偿估计条件');
+      if(w.ambiguous_trade_shares>0)issues.push('存在方向未知成交');if(!w.source_complete)issues.push('数据源未确认区间成交完整');issues.push('盘口收到时间近似；方向仅为报价估计');
+      audit.push({start:w.start,end:w.end,confirmed_at:w.confirmed_at,status:mismatch?'mismatch':partial?'incomplete':'pass',quantity_check:mismatch?'mismatch':'pass',coverage_check:partial?'partial':'observed',direction_check:w.ambiguous_trade_shares>0?'contains_unknown':'estimated_not_official',raw_snapshot_count:isPair?2:0,raw_comparisons:isPair?1:0,raw,delta,cumulative_delta,issues});
     }
-    return {as_of:result.as_of||null,calculation_mode:'trade_update_cumulative',windows,scope:'独立从原始events重建有效快照对、成交来源与逐价A/R/T；边界变化不推断'};
+    const originalVolume=ticks.reduce((n,t)=>n+t.vol,0),totalOk=originalVolume===r.source_trade_volume_shares&&r.active_buy_shares+r.active_sell_shares+r.ambiguous_trade_shares===originalVolume&&claimed.size===ticks.length;
+    if(!totalOk&&audit.length){audit.at(-1).status='mismatch';audit.at(-1).quantity_check='mismatch';audit.at(-1).issues.push('全量成交存在遗漏、重复或买卖未知不守恒');}
+    return {version:11,as_of:r.as_of||null,calculation_mode:'adjacent_snapshot_event_time_estimate',windows:audit,global_quantity_check:totalOk?'pass':'mismatch',scope:'独立核对相邻快照、成交实际时间、买卖未知守恒、价位净变化、覆盖分母和累计；方向永远是估计而非官方确认'};
   }
   return {calculate};
 })();
 if(typeof module!=='undefined')module.exports=BookStatisticsAudit;
 if(typeof globalThis!=='undefined')globalThis.BookStatisticsAudit=BookStatisticsAudit;
-
 
 const DerivedRateReset = (() => {
   const key = 'stock-derived-rate-cutoffs-v1';
@@ -1234,54 +1216,55 @@ const bookRecorder = (() => {
   $('bookHistoryExport').addEventListener('click',()=>{refreshSavedHistory();if(!historyData?.day||historyData.code!==state.code)return;download(`${historyData.code}_${historyData.day}_本地原始历史.json`,JSON.stringify({schema_version:1,exported_at:stamp(),scope:'按北京时间所选日期的全部会话原始记录；只读导出，不改写原始库',...historyData},null,2),'application/json;charset=utf-8');});
 
   const panel=document.createElement('div');panel.id='bookFlowPanel';panel.style.cssText='margin:10px 0;padding:12px;border:1px solid #d5dfed;border-radius:9px;background:#f7faff;line-height:1.8';
-  panel.innerHTML=`<strong>五档累计撤单率</strong><p class="small">成交明细每次更新时结算全部五档。每档撤单＝max(0，累计减少－该档成交)，无成交按0；若减少减成交为负，负值绝对值转为加单；净加单＝加单－撤单，可为负。各项比率使用观察期全部去重成交作共同分母。</p><div id="bookFlowAt" class="small">查询后开始累计。</div><div id="bookFlowVolume" style="font-weight:600" aria-live="polite">共同成交量：等待有效观察区间。</div><div style="display:flex;gap:12px 24px;flex-wrap:wrap"><div style="flex:1;min-width:210px"><strong id="bookFlowBid">买盘累计撤单率：—</strong><div id="bookFlowBidDetail" class="small"></div><div id="bookFlowBidActive" class="small">主动买入（手）：—</div></div><div style="flex:1;min-width:210px"><strong id="bookFlowAsk">卖盘累计撤单率：—</strong><div id="bookFlowAskDetail" class="small"></div><div id="bookFlowAskActive" class="small">主动卖出（手）：—</div></div></div><div id="bookFlowInstant" class="small"></div><div id="bookFlowCoverage" class="small"></div>`;
+  panel.innerHTML=`<strong>相邻五档净委托估算 v11</strong><p class="small">相邻快照按同侧同价比较：估算净委托＝期末挂量−期初挂量＋该队列已收成交；正部为净补单、负部为净撤回，不是实际新增/撤单总量。盘口只有收到时间；主动方向为成交前可见报价估计，缺失、过期或冲突保留未知。</p><div id="bookFlowAt" class="small">查询后开始累计。</div><div id="bookFlowVolume" style="font-weight:600" aria-live="polite">共同成交量：等待有效观察区间。</div><div style="display:flex;gap:12px 24px;flex-wrap:wrap"><div style="flex:1;min-width:210px"><strong id="bookFlowBid">买盘累计撤单率：—</strong><div id="bookFlowBidDetail" class="small"></div><div id="bookFlowBidActive" class="small">主动买入（手）：—</div></div><div style="flex:1;min-width:210px"><strong id="bookFlowAsk">卖盘累计撤单率：—</strong><div id="bookFlowAskDetail" class="small"></div><div id="bookFlowAskActive" class="small">主动卖出（手）：—</div></div></div><div id="bookFlowUnknown" class="small" aria-live="polite">方向未知（手）：—</div><div id="bookFlowInstant" class="small"></div><div id="bookFlowCoverage" class="small"></div>`;
   $('chartPointInfo').after(panel);
   const ledgerBox=document.createElement('section');ledgerBox.id='bookLedger';ledgerBox.style.cssText='margin:12px 0;padding:12px;border:1px solid #d5dfed;border-radius:9px;line-height:1.8';
   ledgerBox.innerHTML=`<h3 style="margin:0">五档价位变化明细</h3><p class="small">保留逐次快照的时间、盘口侧、价格、挂量和净变化，不显示五档范围状态标签。缺失挂量仍为未知、不填0；保存的数据与统计口径不变。</p><label class="small">显示 <select id="bookLedgerFilter"><option value="all">全部盘口侧</option><option value="bid">买盘</option><option value="ask">卖盘</option></select></label> <button id="bookLedgerCSV" class="secondary" type="button">导出可见挂量明细 CSV</button><p id="bookLedgerSummary" class="small" role="status"></p><div class="table-wrap" style="max-height:420px"><table style="min-width:900px"><thead><tr><th>归档窗口（北京）</th><th>盘口侧 / 价格</th><th>实际快照起始 → 结束挂量（手）</th><th>本次同价增量（手）</th><th>本次同价减量（手）</th><th>本次同价净变化（手）</th><th>原始快照</th></tr></thead><tbody id="bookLedgerRows"></tbody></table></div><div style="display:flex;gap:10px;align-items:center;margin-top:8px"><button id="bookLedgerPrev" class="secondary" type="button">较新</button><span id="bookLedgerPage" class="small"></span><button id="bookLedgerNext" class="secondary" type="button">较早</button></div>`;
   panel.after(ledgerBox);
   $('bookStatsCSV').after($('bookLedgerCSV'));
   const threePanel=document.createElement('section');threePanel.id='bookThreeSecondPanel';threePanel.style.cssText='margin:12px 0;padding:12px;border:1px solid #c9dfd3;border-radius:9px;background:#f7fcf9;line-height:1.8';
-  threePanel.innerHTML=`<h3 style="margin:0">实时汇总：逐档增减，按成交明细更新结算</h3><p id="bookAdditionAt" class="small"></p><p id="bookThreeSource" class="small" style="font-weight:600"></p><div style="display:flex;gap:12px 24px;flex-wrap:wrap"><div style="flex:1;min-width:230px"><strong id="bookBidAddition">买盘累计加单率：—</strong><div id="bookBidAdditionDetail" class="small"></div></div><div style="flex:1;min-width:230px"><strong id="bookAskAddition">卖盘累计加单率：—</strong><div id="bookAskAdditionDetail" class="small"></div></div></div><p class="hint">每档累加每次正负变化；成交更新结算：加单＝观察增加＋max(0，该档成交－观察减少)，撤单＝max(0，观察减少－该档成交)，净加单＝加单－撤单，可为负。每次更新全部五档都统计，无成交按0；逐档算完再合计。共同分母为观察期全部去重成交，含五档外。更新时间不固定；尚未结算的变化仍完整记录。分母为0不显示百分比。</p><button id="bookThreeCSV" class="secondary" type="button">导出全部成交更新区间 CSV</button><p id="bookThreeSummary" class="small"></p><div class="table-wrap" style="max-height:360px"><table style="min-width:1450px"><thead><tr><th>成交更新区间（北京）</th><th>共同成交量（手，仅一份）</th><th>买盘加单（手）</th><th>买盘撤单（手）</th><th>买盘净加单（手）</th><th>买盘加单率</th><th>买盘撤单率</th><th>买盘净加单率</th><th>卖盘加单（手）</th><th>卖盘撤单（手）</th><th>卖盘净加单（手）</th><th>卖盘加单率</th><th>卖盘撤单率</th><th>卖盘净加单率</th><th>五档可见状态（变动项数）</th><th>采样说明</th><th>各档计算明细</th></tr></thead><tbody id="bookThreeRows"></tbody></table></div>`;
+  threePanel.innerHTML=`<h3 style="margin:0">相邻快照汇总：可见变化与成交补偿估算</h3><p id="bookAdditionAt" class="small"></p><p id="bookThreeSource" class="small" style="font-weight:600"></p><div style="display:flex;gap:12px 24px;flex-wrap:wrap"><div style="flex:1;min-width:230px"><strong id="bookBidAddition">买盘累计加单率：—</strong><div id="bookBidAdditionDetail" class="small"></div></div><div style="flex:1;min-width:230px"><strong id="bookAskAddition">卖盘累计加单率：—</strong><div id="bookAskAdditionDetail" class="small"></div></div></div><p class="hint">前一帧→后一帧，按价格而非档位比较。只有两帧同侧同价可见、已收到覆盖响应且成交归侧可用时估算；进入/退出五档不当作新增或撤单。数据源未承诺成交完整，因此所有补偿均为已收数据估计。比率仅用相同有效区间的成交分母；未知量不默认卖出，待结算不显示为0。</p><button id="bookThreeCSV" class="secondary" type="button">导出全部相邻区间估算 CSV</button><p id="bookThreeSummary" class="small"></p><div class="table-wrap" style="max-height:360px"><table style="min-width:1450px"><thead><tr><th>相邻快照/未覆盖成交区间（北京）</th><th>共同成交量（手，仅一份）</th><th>买盘净补单估算（手）</th><th>买盘净撤回估算（手）</th><th>买盘净加单（手）</th><th>买盘加单率</th><th>买盘撤单率</th><th>买盘净加单率</th><th>卖盘净补单估算（手）</th><th>卖盘净撤回估算（手）</th><th>卖盘净加单（手）</th><th>卖盘加单率</th><th>卖盘撤单率</th><th>卖盘净加单率</th><th>五档可见状态（变动项数）</th><th>采样说明</th><th>各档计算明细</th></tr></thead><tbody id="bookThreeRows"></tbody></table></div>`;
   panel.after(threePanel);
   const auditPanel=document.createElement('details');auditPanel.id='bookAuditPanel';auditPanel.style.cssText='margin:12px 0;padding:12px;border:1px solid #cbd8e7;border-radius:9px;background:#fbfcff;line-height:1.8';
-  auditPanel.innerHTML=`<summary style="cursor:pointer;font-size:1.17em;font-weight:700">上下数量核对：实时快照 ↔ 成交更新汇总（点击展开/收起）</summary><p class="small">从下方保存的原始快照重新按同侧、同价格及相同成交更新区间计算，再核对上方窗口增减量、成交分母和累计值；同时检查原始变化行是否与快照相符。进入、移出五档不推断加撤，原始缺失值不改。差额＝上方统计−原始重算；0表示该项数量一致。</p><p id="bookAuditStatus" role="status" style="font-weight:600">等待可比较的盘口快照。</p><p id="bookAuditCumulative" class="small"></p><div class="table-wrap" style="max-height:320px"><table style="min-width:1080px"><thead><tr><th>成交更新区间（北京）</th><th>核对状态</th><th>原始快照数 / 比较次数</th><th>买增加差（手）</th><th>买减少差（手）</th><th>卖增加差（手）</th><th>卖减少差（手）</th><th>成交量差（手）</th><th>核对说明</th></tr></thead><tbody id="bookAuditRows"></tbody></table></div><p class="hint">每次响应后核对当前已结算的成交更新区间，一致不代表源数据完整；仅核对可观测数量，不是交易所逐委托订单核销；资料不足、待确认或排除的时段不会冒充“核对一致”。滑动趋势图按选点之前已收到的数据重新核对。全部核对结果随原始记录JSON导出。</p>`;
+  auditPanel.innerHTML=`<summary style="cursor:pointer;font-size:1.17em;font-weight:700">分项核对：数量守恒 / 时间覆盖 / 方向依据（点击展开/收起）</summary><p class="small">独立核对相邻快照、实际成交时间、买＋卖＋未知守恒、逐价净委托恒等式、有效分母与累计。资料不足与计算差异分开显示；即使数量一致，报价估计也不等于真实主动方向。</p><p id="bookAuditStatus" role="status" style="font-weight:600">等待可比较的盘口快照。</p><p id="bookAuditCumulative" class="small"></p><div class="table-wrap" style="max-height:320px"><table style="min-width:1080px"><thead><tr><th>相邻快照/未覆盖成交区间（北京）</th><th>核对状态</th><th>原始快照数 / 比较次数</th><th>买增加差（手）</th><th>买减少差（手）</th><th>卖增加差（手）</th><th>卖减少差（手）</th><th>成交量差（手）</th><th>核对说明</th></tr></thead><tbody id="bookAuditRows"></tbody></table></div><p class="hint">每次响应后核对当前已结算的成交更新区间，一致不代表源数据完整；仅核对可观测数量，不是交易所逐委托订单核销；资料不足、待确认或排除的时段不会冒充“核对一致”。滑动趋势图按选点之前已收到的数据重新核对。全部核对结果随原始记录JSON导出。</p>`;
   threePanel.after(auditPanel);
   function renderAudit(result,cutoff){
-    const all=(result?.integrity_audit?.windows||[]).filter(w=>Date.parse(w.confirmed_at)<=cutoff),pass=all.filter(w=>w.status==='pass').length,mismatch=all.filter(w=>w.status==='mismatch').length,incomplete=all.filter(w=>w.status!=='pass'&&w.status!=='mismatch').length;
-    $('bookAuditStatus').textContent=all.length?`${viewTime?'截至所选时刻':'当前'}已核对 ${all.length} 窗：一致 ${pass} 窗，差异 ${mismatch} 窗，资料不足 ${incomplete} 窗。`:'等待可比较的盘口快照；尚未宣称核对一致。';
+    const all=(result?.integrity_audit?.windows||[]).filter(w=>Date.parse(w.confirmed_at)<=cutoff),pass=all.filter(w=>w.quantity_check==='pass').length,mismatch=all.filter(w=>w.status==='mismatch').length,incomplete=all.filter(w=>w.coverage_check!=='observed').length;
+    $('bookAuditStatus').textContent=all.length?`${viewTime?'截至所选时刻':'当前'}已核对 ${all.length} 窗：数量一致 ${pass} 窗，差异 ${mismatch} 窗，资料不足/源未确认完整 ${incomplete} 窗；方向仅为估计。`:'等待可比较的盘口快照；尚未宣称核对一致。';
     $('bookAuditStatus').style.color=mismatch?'#a12622':incomplete?'#805900':all.length?'#16623b':'inherit';
     const last=all.at(-1),d=last?.cumulative_delta;
     $('bookAuditCumulative').textContent=last?`同期累计差额（上层−原始重算）：买增加 ${fmtLots(d?.bid_added_shares)} 手，买减少 ${fmtLots(d?.bid_reduced_shares)} 手，卖增加 ${fmtLots(d?.ask_added_shares)} 手，卖减少 ${fmtLots(d?.ask_reduced_shares)} 手，成交 ${fmtLots(d?.source_trade_volume_shares)} 手。显示最近20窗，其余完整保留。`:'';
-    $('bookAuditRows').replaceChildren(...all.slice(-20).reverse().map(w=>{const tr=document.createElement('tr'),clock=t=>tickSourceTime(t).split(' ').at(-1),values=[`${clock(w.start)} → ${clock(w.end)}`,w.status==='pass'?'数量一致':w.status==='mismatch'?'存在差异':'资料不足',`${w.raw_snapshot_count??'—'} / ${w.raw_comparisons??'—'}`,fmtLots(w.delta?.bid_added_shares),fmtLots(w.delta?.bid_reduced_shares),fmtLots(w.delta?.ask_added_shares),fmtLots(w.delta?.ask_reduced_shares),fmtLots(w.delta?.source_trade_volume_shares),(w.issues||[]).join('；')||(w.status==='pass'?'快照、变化行、成交分母及累计值一致':'未判定一致')];for(const value of values){const td=document.createElement('td');td.textContent=String(value);tr.appendChild(td);}return tr;}));
+    $('bookAuditRows').replaceChildren(...all.slice(-20).reverse().map(w=>{const tr=document.createElement('tr'),clock=t=>tickSourceTime(t).split(' ').at(-1),values=[`${clock(w.start)} → ${clock(w.end)}`,w.status==='mismatch'?'存在差异':w.status==='pass'?'数量一致/报价估计':'数量已核对/覆盖不完整',`${w.raw_snapshot_count??'—'} / ${w.raw_comparisons??'—'}`,fmtLots(w.delta?.bid_added_shares),fmtLots(w.delta?.bid_reduced_shares),fmtLots(w.delta?.ask_added_shares),fmtLots(w.delta?.ask_reduced_shares),fmtLots(w.delta?.source_trade_volume_shares),(w.issues||[]).join('；')||(w.status==='pass'?'快照、变化行、成交分母及累计值一致':'未判定一致')];for(const value of values){const td=document.createElement('td');td.textContent=String(value);tr.appendChild(td);}return tr;}));
   }
   let threeRenderKey='';
   function renderThreeSecond(result,cutoff,snapshot=null,clear=false){
-    const entries=clear?[]:(result?.windows||[]).filter(w=>Date.parse(w.confirmed_at)<=cutoff);
-    $('bookAdditionAt').textContent=snapshot?`${viewTime?'截至所选时刻':'最新累计'}｜盘口已更新至 ${tickSourceTime(snapshot.through)}。`:'等待可比较的盘口快照。';
-    const volume=snapshot?.bid?.denominator_trade_shares;
-    const volumeText=snapshot?`共同成交量：${fmtLots(volume)} 手（观察期全部去重成交，含五档内外，每笔只计一次）`:'共同成交量：等待成交明细更新结算；盘口每次变化均已独立记录。';
+    const entries=clear?[]:(result?.windows||[]).filter(w=>Date.parse(w.end)<=cutoff);
+    $('bookAdditionAt').textContent=snapshot?`${viewTime?'截至所选时刻':'最新累计'}｜统计至 ${tickSourceTime(snapshot.through)}。`:'等待相邻有效快照。';
+    const volume=snapshot?.bid?.denominator_trade_shares,total=snapshot?.source_trade_volume_shares;
+    const coverage=Number.isFinite(total)&&total>0?(volume/total*100).toFixed(2)+'%':'—';
+    const volumeText=snapshot?`有效成交分母：${fmtLots(volume)} 手；全量已收成交：${fmtLots(total)} 手；估算覆盖率：${coverage}（只累计同范围的估算分子和成交分母）`:'有效成交分母：等待相邻盘口与成交资料；未观测不等于0。';
     $('bookThreeSource').textContent=volumeText;$('bookFlowVolume').textContent=volumeText;
-    for(const [side,suffix,label]of[['bid','Bid','买盘'],['ask','Ask','卖盘']]){const m=snapshot?.[side];$('book'+suffix+'Addition').textContent=`${label}累计加单率：${fmtTradeRate(m?.addition_rate_pct,m?.denominator_trade_shares)}`;$('book'+suffix+'AdditionDetail').textContent=m?`加单 ${fmtLots(m.added_shares)} 手；撤单 ${fmtLots(m.cancellation_shares)} 手；观察减少 ${fmtLots(m.observed_reduction_shares)} 手；净加单 ${fmtLots(m.net_change_shares)} 手；净加单率 ${fmtTradeRate(m.net_addition_rate_pct,m.denominator_trade_shares)}；共同成交分母 ${fmtLots(m.denominator_trade_shares)} 手。`:'';}
-    const activeBidNode=$('bookFlowBidActive'), activeAskNode=$('bookFlowAskActive'); if(activeBidNode) activeBidNode.textContent=snapshot?`主动买入（手）：${fmtLots(snapshot.active_buy_shares)}`:'主动买入（手）：—'; if(activeAskNode) activeAskNode.textContent=snapshot?`主动卖出（手）：${fmtLots(snapshot.active_sell_shares)}`:'主动卖出（手）：—';
-    $('bookThreeSummary').textContent=`已结算 ${entries.length} 次成交更新，买盘、卖盘分别显示全部 ${entries.length} 次，最新在前，可在表内上下滚动查看。待下次成交更新结算 ${result?.pending_intervals||0} 次。各行数量和比率均为该次更新区间值；共同成交量在两框中重复列示用于对照，不相加。全部记录仍可导出。`;
-    const visible=[...entries].reverse(),key=JSON.stringify([sessions.get(state.code)?.id,visible]);if(!clear&&key===threeRenderKey)return;threeRenderKey=key;
+    $('bookFlowUnknown').textContent=snapshot?`方向未知（手）：${fmtLots(snapshot.ambiguous_trade_shares)}；已收总量＝估计买入＋估计卖出＋未知。`:'方向未知（手）：—';
+    for(const [side,suffix,label]of[['bid','Bid','买盘'],['ask','Ask','卖盘']]){
+      const m=snapshot?.[side];$('book'+suffix+'Addition').textContent=`${label}累计净补单率（估算）：${fmtTradeRate(m?.addition_rate_pct,m?.denominator_trade_shares)}`;
+      $('book'+suffix+'AdditionDetail').textContent=m?`加单 ${fmtLots(m.added_shares)} 手；撤单 ${fmtLots(m.cancellation_shares)} 手；观察增加 ${fmtLots(m.visible_added_shares)} 手；观察减少 ${fmtLots(m.observed_reduction_shares)} 手；净加单 ${fmtLots(m.net_change_shares)} 手；净加单率 ${fmtTradeRate(m.net_addition_rate_pct,m.denominator_trade_shares)}；共同成交分母 ${fmtLots(m.denominator_trade_shares)} 手。净补/撤回只代表已收数据估算，不是实际新增/撤单总量。`:'';
+    }
+    $('bookFlowBidActive').textContent=snapshot?`估计主动买入（手）：${fmtLots(snapshot.active_buy_shares)}`:'估计主动买入（手）：—';
+    $('bookFlowAskActive').textContent=snapshot?`估计主动卖出（手）：${fmtLots(snapshot.active_sell_shares)}`:'估计主动卖出（手）：—';
+    $('bookThreeSummary').textContent=`共 ${entries.length} 个相邻快照/未覆盖成交区间，${result?.pending_intervals||0} 个等待成交资料；下表显示最近200项，全部可导出。每行是该区间值，卡片是有效覆盖累计；成交迟到会回补原区间。`;
+    const visible=entries.slice(-200).reverse(),renderKey=JSON.stringify([sessions.get(state.code)?.id,visible]);if(!clear&&renderKey===threeRenderKey)return;threeRenderKey=renderKey;
     $('bookThreeRows').replaceChildren(...visible.map(w=>{
       const tr=document.createElement('tr'),clock=t=>tickSourceTime(t).split(' ').at(-1);
-      tr.dataset.uiInterval=`${clock(w.start)} → ${clock(w.end)}`;
-      tr.dataset.uiConfirmed=tickSourceTime(w.confirmed_at);
-      tr.dataset.uiVolume=fmtLots(w.source_trade_volume_shares);
-      for(const [side,suffix]of[['bid','Bid'],['ask','Ask']]){
-        const m=w[side]||{},prefix='ui'+suffix;
-        for(const [key,value]of Object.entries({VisibleAdded:fmtLots(m.visible_added_shares),ObservedReduction:fmtLots(m.observed_reduction_shares),TradeCredit:fmtLots(m.trade_credit_shares),Added:fmtLots(m.added_shares),Cancelled:fmtLots(m.cancellation_shares),Net:fmtLots(m.net_change_shares),AdditionRate:fmtTradeRate(m.addition_rate_pct,m.denominator_trade_shares),ReductionRate:fmtTradeRate(m.reduction_rate_pct,m.denominator_trade_shares),NetRate:fmtTradeRate(m.net_addition_rate_pct,m.denominator_trade_shares)}))tr.dataset[prefix+key]=value;
-      }
+      tr.dataset.uiInterval=`${clock(w.start)} → ${clock(w.end)}`;tr.dataset.uiConfirmed=tickSourceTime(w.updated_at);tr.dataset.uiVolume=fmtLots(w.source_trade_volume_shares);
+      tr.dataset.uiStatus=w.trade_coverage;tr.dataset.uiUnknown=fmtLots(w.ambiguous_trade_shares);
+      for(const [side,suffix]of[['bid','Bid'],['ask','Ask']]){const m=w[side]||{},prefix='ui'+suffix;for(const [k,v]of Object.entries({VisibleAdded:fmtLots(m.visible_added_shares),ObservedReduction:fmtLots(m.observed_reduction_shares),TradeCredit:fmtLots(m.trade_credit_shares),Added:fmtLots(m.added_shares),Cancelled:fmtLots(m.cancellation_shares),Net:fmtLots(m.net_change_shares),AdditionRate:fmtTradeRate(m.addition_rate_pct,m.denominator_trade_shares),ReductionRate:fmtTradeRate(m.reduction_rate_pct,m.denominator_trade_shares),NetRate:fmtTradeRate(m.net_addition_rate_pct,m.denominator_trade_shares)}))tr.dataset[prefix+k]=v;}
       const values=[tr.dataset.uiInterval,fmtLots(w.source_trade_volume_shares)];
-      for(const side of['bid','ask']){const m=w[side];values.push(fmtLots(m.added_shares),fmtLots(m.cancellation_shares),fmtLots(m.net_change_shares),fmtTradeRate(m.addition_rate_pct,m.denominator_trade_shares),fmtTradeRate(m.reduction_rate_pct,m.denominator_trade_shares),fmtTradeRate(m.net_addition_rate_pct,m.denominator_trade_shares));}
-      values.push(`同价变化 ${w.visibility_counts?.in_five_same_price||0} 项；进入 ${w.visibility_counts?.entered_five||0} 项；移出 ${w.visibility_counts?.left_five||0} 项`);
-      values.push(`成交更新结算；${w.sample_pairs}次盘口比较；无匹配成交的档位按0${w.ambiguous_trade_shares?'；有归侧不明成交，仅计分母':''}`);
+      for(const side of ['bid','ask']){const m=w[side];values.push(fmtLots(m.added_shares),fmtLots(m.cancellation_shares),fmtLots(m.net_change_shares),fmtTradeRate(m.addition_rate_pct,m.denominator_trade_shares),fmtTradeRate(m.reduction_rate_pct,m.denominator_trade_shares),fmtTradeRate(m.net_addition_rate_pct,m.denominator_trade_shares));}
+      values.push(`同价变化 ${w.visibility_counts?.in_five_same_price||0}；进入 ${w.visibility_counts?.entered_five||0}；移出 ${w.visibility_counts?.left_five||0}`);
+      values.push(`${w.window_kind==='adjacent_snapshot'?'相邻快照':'无盘口覆盖'}；${w.included_in_cumulative?'已收数据估算':'资料不足/待结算'}；未知 ${fmtLots(w.ambiguous_trade_shares)} 手；源未保证完整`);
       for(const value of values){const td=document.createElement('td');td.textContent=String(value);tr.appendChild(td);}
-      const td=document.createElement('td'),details=document.createElement('details'),summary=document.createElement('summary'),pre=document.createElement('pre');
-      summary.textContent='逐档增减与净加单率';pre.style.cssText='white-space:pre-wrap;font-size:11px;max-width:420px';
-      pre.textContent=(w.levels||[]).map(z=>`${z.side==='bid'?'买':'卖'} ${z.price}：加 ${fmtLots(z.added_shares)}；减 ${fmtLots(z.observed_reduction_shares)}；成交 ${fmtLots(z.executed_shares)}；撤 ${fmtLots(z.cancellation_shares)}；净加 ${fmtLots(z.net_change_shares)} 手；净加单率 ${fmtTradeRate(z.net_addition_rate_pct,z.denominator_trade_shares)}\n`+(z.observations||[]).map(o=>`  ${clock(o.received_at)} ${o.delta_shares>=0?'+':''}${fmtLots(o.delta_shares)} 手`).join('\n')).join('\n');
+      const td=document.createElement('td'),details=document.createElement('details'),summary=document.createElement('summary'),pre=document.createElement('pre');summary.textContent='逐价快照、成交补偿与依据';pre.style.cssText='white-space:pre-wrap;font-size:11px;max-width:420px';
+      pre.textContent=(w.levels||[]).map(z=>`${z.side==='bid'?'买':'卖'} ${z.price}：挂量 ${fmtLots(z.before_shares)}→${fmtLots(z.after_shares)}；可见净变化 ${fmtLots(z.delta_shares)}；归侧成交 ${fmtLots(z.executed_shares)}；估算净补 ${fmtLots(z.added_shares)}；估算净撤 ${fmtLots(z.cancellation_shares)}；净委托 ${fmtLots(z.net_change_shares)} 手；${z.estimate_status}`).join('\n')+'\n成交归类依据：\n'+JSON.stringify(w.trade_decisions||[],null,2);
       details.append(summary,pre);td.append(details);tr.append(td);return tr;
     }));
   }
@@ -1319,7 +1302,7 @@ const bookRecorder = (() => {
   const stamp = () => new Date().toISOString();
   const fmtLots = n => Number.isFinite(n) ? (n / 100).toLocaleString('zh-CN', { maximumFractionDigits: 2 }) : '—';
   const fmtRate = n => Number.isFinite(n) ? n.toFixed(2) + '%' : '—';
-  const fmtTradeRate = (rate, denominator) => denominator === 0 ? '—（已收成交为0）' : denominator == null ? '—（尚无成交更新结算）' : fmtRate(rate);
+  const fmtTradeRate = (rate, denominator) => denominator === 0 ? '—（有效成交分母为0）' : denominator == null ? '—（资料不足/待结算）' : fmtRate(rate);
   function compare(before, after) {
     const map = rows => { const m = new Map(); for (const r of rows || []) { const side = ['bid', 'buy'].includes(String(r.side).toLowerCase()) ? 'bid' : ['ask', 'sell'].includes(String(r.side).toLowerCase()) ? 'ask' : null; const p = Number(r.price), v = Number(r.volume); if (side && r.price != null && p > 0 && r.volume != null && Number.isFinite(v) && v >= 0) m.set(`${side}|${p}`, { side, price: p, volume: v }); } return m; };
     const a = map(before), b = map(after), out = [];
@@ -1338,7 +1321,7 @@ const bookRecorder = (() => {
     const c = caches.get(code), session = viewSession || sessions.get(code); if (!c || !session) return null;
     const marker = DerivedRateReset.cutoff(code, session.day);
     const sessionKey = JSON.stringify([session.id, session.started_at, session.day]);
-    if (force || c.dirty || !c.result || c.cutoff !== cutoff || c.rateMarker !== marker || c.resultSession !== sessionKey) {
+    if (force || c.dirty || !c.result || c.result.version !== BookThreeSecondCalculator.version || c.cutoff !== cutoff || c.rateMarker !== marker || c.resultSession !== sessionKey) {
       const rateSession = DerivedRateReset.sessionFor(session, marker), ticks = [...c.ticks.values()];
       c.result = BookThreeSecondCalculator.calculate(c.events, ticks, rateSession, cutoff);
       c.result.integrity_audit = BookStatisticsAudit.calculate(c.events, ticks, rateSession, c.result);
@@ -1392,23 +1375,14 @@ const bookRecorder = (() => {
     return { result, session: s };
   }
   function publishBookWaves() {
-    const code = state.code, today = dayShanghai(), day = state.chartDate || today, c = code ? caches.get(code) : null;
-    let session = null, result = null, live = false;
-    const chosen = bookViewSession(code, day);
-    if (c && chosen) {
-      live = day === today && chosen.id === sessions.get(code)?.id;
-      const expectedKey = JSON.stringify([chosen.id, chosen.started_at, chosen.day]);
-      if (!c.dirty && c.cutoff === Infinity && c.result && c.resultSession === expectedKey) { result = c.result; session = DerivedRateReset.sessionFor(chosen, c.rateMarker); }
-      else ({ result, session } = waveResultFor(c, chosen));
-    }
-    const chartOpen = Date.parse(`${day}T09:30:00+08:00`), chartClose = Date.parse(`${day}T15:00:00+08:00`);
-    const windows = (result?.windows || []).filter(w => { const end = Date.parse(w.end); return end >= chartOpen && end <= chartClose; }).map(w => ({ start: Date.parse(w.start), end: Date.parse(w.end), spans: (w.matched_intervals || []).map(x => [Date.parse(x.start), Date.parse(x.end)]), volume: w.source_trade_volume_shares, activeBuy: w.active_buy_shares, activeSell: w.active_sell_shares, bidAdded: w.bid?.added_shares, bidCancelled: w.bid?.cancellation_shares, bidNet: w.bid?.net_change_shares, askAdded: w.ask?.added_shares, askCancelled: w.ask?.cancellation_shares, askNet: w.ask?.net_change_shares }));
-    const last = windows.at(-1), key = JSON.stringify([code, day, session?.id || '', session?.started_at || '', windows.length, last?.end || 0, last?.volume || 0]);
-    if (key === wavePublished) return;
-    wavePublished = key;
-    const payload = { code, name: state.name || '', day, today, live, session_id: session?.id || null, started_at: session?.started_at || null, windows };
-    window.__bookWaveData = payload;
-    document.dispatchEvent(new CustomEvent('bookwaves', { detail: payload }));
+    const code=state.code,today=dayShanghai(),normalized=viewTime?normalizeChartTime(viewTime):null,day=normalized?.slice(0,10)||state.chartDate||today,c=code?caches.get(code):null;
+    const cutoff=normalized?Date.parse(normalized.replace(' ','T')+'+08:00'):Infinity,chosen=bookViewSession(code,day);
+    const result=c&&chosen?recompute(code,false,cutoff,chosen):null,session=chosen?DerivedRateReset.sessionFor(chosen,result?.rate_reset_at):null;
+    const chartOpen=Date.parse(`${day}T09:30:00+08:00`),chartClose=Date.parse(`${day}T15:00:00+08:00`);
+    const windows=(result?.windows||[]).filter(w=>Date.parse(w.end)>=chartOpen&&Date.parse(w.end)<=Math.min(chartClose,cutoff)).map(w=>({start:Date.parse(w.start),end:Date.parse(w.end),spans:w.included_in_cumulative?(w.matched_intervals||[]).map(x=>[Date.parse(x.start),Date.parse(x.end)]):[],volume:w.source_trade_volume_shares,activeBuy:w.active_buy_shares,activeSell:w.active_sell_shares,activeUnknown:w.ambiguous_trade_shares,flowEligible:w.included_in_cumulative,status:w.trade_coverage,bidAdded:w.bid?.added_shares,bidCancelled:w.bid?.cancellation_shares,bidNet:w.bid?.net_change_shares,askAdded:w.ask?.added_shares,askCancelled:w.ask?.cancellation_shares,askNet:w.ask?.net_change_shares,trades:(w.trade_decisions||[]).map(t=>({time:Date.parse(t.trade_time),direction:t.active_direction,volume:t.volume_shares}))}));
+    const key=JSON.stringify([BookThreeSecondCalculator.version,code,day,cutoff,session?.id||'',session?.started_at||'',c?.computed,windows]);if(key===wavePublished)return;wavePublished=key;
+    const payload={version:11,code,name:state.name||'',day,today,live:!viewTime&&day===today&&chosen?.id===sessions.get(code)?.id,selected_at:normalized,cutoff:Number.isFinite(cutoff)?cutoff:null,session_id:session?.id||null,started_at:session?.started_at||null,windows};
+    window.__bookWaveData=payload;document.dispatchEvent(new CustomEvent('bookwaves',{detail:payload}));
   }
   function renderStats() {
     renderStatsCore();
@@ -1425,6 +1399,7 @@ const bookRecorder = (() => {
       $('bookFlowAt').textContent = message;
       $('bookFlowBid').textContent = '买盘累计撤单率：—'; $('bookFlowAsk').textContent = '卖盘累计撤单率：—'; const activeBidNode=$('bookFlowBidActive'), activeAskNode=$('bookFlowAskActive'); if(activeBidNode) activeBidNode.textContent='主动买入（手）：—'; if(activeAskNode) activeAskNode.textContent='主动卖出（手）：—';
       for (const id of ['bookFlowBidDetail', 'bookFlowAskDetail', 'bookFlowInstant', 'bookFlowCoverage']) $(id).textContent = '';
+      $('bookFlowUnknown').textContent='方向未知（手）：—';
       renderLedger(null,cutoff,true);
       renderThreeSecond(null,cutoff,null,true);
       renderAudit(null,cutoff);
@@ -1439,14 +1414,14 @@ const bookRecorder = (() => {
     const snapshot = selected ? (lo ? timeline[lo - 1] : null) : (timeline.at(-1) || null);
     const startText = `录制启动 ${tickSourceTime(session.started_at)}（北京）${result?.rate_reset_at ? '｜今日比率起点 ' + tickSourceTime(result.rate_reset_at) + '（北京；不改录制会话）' : ''}`;
     if (!snapshot) {
-      noData(`${at}｜${startText}｜等待成交明细更新结算；每次盘口变化均持续独立记录。`);
+      noData(`${at}｜${startText}｜等待相邻快照与成交资料；可见变化独立保存，未确认不显示为0。`);
       renderLedger(result,cutoff);
       if (result?.rate_reset_at) {
-        const zero = '累计加单 0 手；累计撤单 0 手；共同成交分母 0 手。等待新起点后的成交明细更新；分母为0，比率不可计算。';
+        const zero = '加单 — 手；撤单 — 手；共同成交分母 0 手。等待新起点后的相邻快照与成交资料，未知不等于0。';
         for (const id of ['bookFlowBidDetail','bookFlowAskDetail','bookBidAdditionDetail','bookAskAdditionDetail']) $(id).textContent = zero;
         $('bookFlowVolume').textContent = $('bookThreeSource').textContent = '共同成交量：0 手（今日比率新起点后尚无成交明细更新）';
       }
-      $('bookFlowCoverage').textContent = selected ? '所选时刻之前尚无可比较的盘口快照，不使用后来的数据冒充当时结果。' : `待下次成交明细更新结算 ${result?.pending_intervals || 0} 次盘口比较；每次变化均保留。`;
+      $('bookFlowCoverage').textContent = selected ? '所选时刻之前尚无可比较的盘口快照，不使用后来的数据冒充当时结果。' : `${result?.pending_intervals || 0} 个相邻区间待成交资料；可见变化均保留，估算资料不足不填0。`;
       $('bookStatsDetail').textContent = `${startText}；当前会话快照 ${result?.snapshots || 0}，候选区间 ${result?.candidate_intervals || 0}，排除区间 ${result?.excluded_intervals || 0}。`;
       return;
     }
@@ -1456,13 +1431,13 @@ const bookRecorder = (() => {
     $('bookFlowAt').textContent = `${at}｜${startText}｜盘口更新至 ${tickSourceTime(snapshot.through)}；数据更新于 ${tickSourceTime(snapshot.at)}`;
     for (const [side, label] of [['bid', '买盘'], ['ask', '卖盘']]) {
       const metric = snapshot[side], suffix = side === 'bid' ? 'Bid' : 'Ask';
-      $('bookFlow' + suffix).textContent = `${label}累计撤单率：${fmtTradeRate(metric.reduction_rate_pct,metric.denominator_trade_shares)}`;
-      $('bookFlow' + suffix + 'Detail').textContent = `撤单 ${fmtLots(metric.cancellation_shares)} 手；成交解释 ${fmtLots(metric.trade_credit_shares)} 手；观察减少 ${fmtLots(metric.observed_reduction_shares)} 手；加单 ${fmtLots(metric.added_shares)} 手；净加单 ${fmtLots(metric.net_change_shares)} 手；净加单率 ${fmtTradeRate(metric.net_addition_rate_pct,metric.denominator_trade_shares)}；共同成交分母 ${fmtLots(metric.denominator_trade_shares)} 手；每档先结算，再汇总五档。`;
+      $('bookFlow' + suffix).textContent = `${label}累计净撤回率（估算）：${fmtTradeRate(metric.reduction_rate_pct,metric.denominator_trade_shares)}`;
+      $('bookFlow' + suffix + 'Detail').textContent = `撤单 ${fmtLots(metric.cancellation_shares)} 手；成交解释 ${fmtLots(metric.trade_credit_shares)} 手；观察减少 ${fmtLots(metric.observed_reduction_shares)} 手；加单 ${fmtLots(metric.added_shares)} 手；净加单 ${fmtLots(metric.net_change_shares)} 手；净加单率 ${fmtTradeRate(metric.net_addition_rate_pct,metric.denominator_trade_shares)}；共同成交分母 ${fmtLots(metric.denominator_trade_shares)} 手；仅有效覆盖区间的净补/净撤回估算，不是真实新增/撤单总量。`;
     }
     const instant = snapshot.instant;
-    $('bookFlowInstant').textContent = instant ? `最近成交更新区间 ${tickSourceTime(instant.start)} → ${tickSourceTime(instant.end)}｜买盘撤单率 ${fmtTradeRate(instant.bid?.reduction_rate_pct,instant.bid?.denominator_trade_shares)}，卖盘撤单率 ${fmtTradeRate(instant.ask?.reduction_rate_pct,instant.ask?.denominator_trade_shares)}` : '';
-    $('bookFlowCoverage').textContent = `已结算 ${snapshot.confirmed_intervals} 次成交更新，排除 ${snapshot.excluded_intervals} 段不可比较快照；待下次更新结算 ${result.pending_intervals||0} 次盘口比较。进出五档仅记边界，不推算加撤。${selected?'仅使用选点前已收到的数据。':''}`;
-    $('bookStatsDetail').textContent = `${startText}；${collectors.has(code) && enabled ? '正在记录' : '已暂停 / 仅查看本地记录'}。会话快照 ${result.snapshots}，已核对 ${snapshot.confirmed_intervals} 区间。每档观察增加加上成交超出减少的部分为加单；减少超出成交的部分为撤单；各段持续累加，净加单＝累计加单－累计撤单，可为负。观察期全部成交（含五档外）作共同分母，每笔只计一次。`;
+    $('bookFlowInstant').textContent = instant ? `最近相邻快照/未覆盖成交区间 ${tickSourceTime(instant.start)} → ${tickSourceTime(instant.end)}｜买盘撤单率 ${fmtTradeRate(instant.bid?.reduction_rate_pct,instant.bid?.denominator_trade_shares)}，卖盘撤单率 ${fmtTradeRate(instant.ask?.reduction_rate_pct,instant.ask?.denominator_trade_shares)}` : '';
+    $('bookFlowCoverage').textContent = `有效估算 ${snapshot.confirmed_intervals} 个区间；排除 ${snapshot.excluded_intervals} 段快照缺口；${result.pending_intervals||0} 个区间待成交资料。未覆盖区间不计入比率分母；进入/退出五档余量未知。主动方向仅为成交前可见报价估计，源未承诺成交完整。${selected?'表格与四图均截止所选时刻，且不使用后来收到的数据。':''}`;
+    $('bookStatsDetail').textContent = `${startText}；${collectors.has(code) && enabled ? '正在记录' : '已暂停 / 仅查看本地记录'}。算法v11：相邻快照、同侧同价；净委托估计＝挂量差＋该队列已收成交。源时间缺失，盘口收到时间近似。正负部不是实际新增/撤单总量；原始记录不改写，缺失保留未知。会话快照 ${result.snapshots}，有效估算 ${snapshot.confirmed_intervals} 区间。`;
   }
   async function refresh() {
     try {
@@ -1622,15 +1597,15 @@ const bookRecorder = (() => {
         for(const r of result?.visibility_changes||[])rows.push([r.id,code,r.side,r.price,r.interval_start,r.interval_end,r.source_span_start,r.source_span_end,r.before_shares,r.after_shares,r.delta_shares,r.visibility_label,r.before_level,r.after_level,r.statistics_eligible,JSON.stringify(r.observations)]);
         download(`${code}_五档可见状态明细_${time}.csv`,csvText(rows),'text/csv;charset=utf-8');
       } else if (mode === 'three') {
-        const rows=[['股票','成交更新区间开始UTC','成交更新区间结束UTC','成交明细更新UTC','共同成交量股仅一份','买盘增加股','买盘撤单股','买盘净加单股','买增加成交比百分比','买减少成交比百分比','卖盘增加股','卖盘撤单股','卖盘净加单股','卖增加成交比百分比','卖减少成交比百分比','实际快照开始UTC','实际快照结束UTC','采样跨窗','比较次数','成交方向归因','同价仍在五档内变动项数','进入五档次数','移出五档次数','今日比率重置起点UTC（空为未重置）','买盘净加单率百分比','卖盘净加单率百分比','逐档增减与比率JSON']];
-        for(const w of result?.windows||[])rows.push([code,w.start,w.end,w.confirmed_at,w.source_trade_volume_shares,w.bid.added_shares,w.bid.cancellation_shares,w.bid.net_change_shares,w.bid.addition_rate_pct,w.bid.reduction_rate_pct,w.ask.added_shares,w.ask.cancellation_shares,w.ask.net_change_shares,w.ask.addition_rate_pct,w.ask.reduction_rate_pct,w.source_span_start,w.source_span_end,w.sampling_crosses_boundary,w.sample_pairs,'更新区间唯一价格侧',w.visibility_counts?.in_five_same_price,w.visibility_counts?.entered_five,w.visibility_counts?.left_five,result?.rate_reset_at||'',w.bid.net_addition_rate_pct,w.ask.net_addition_rate_pct,JSON.stringify(w.levels||[])]);
+        const rows=[['股票','成交更新区间开始UTC','成交更新区间结束UTC','成交明细更新UTC','共同成交量股仅一份','买盘增加股','买盘撤单股','买盘净加单股','买增加成交比百分比','买减少成交比百分比','卖盘增加股','卖盘撤单股','卖盘净加单股','卖增加成交比百分比','卖减少成交比百分比','实际快照开始UTC','实际快照结束UTC','采样跨窗','比较次数','成交方向归因','同价仍在五档内变动项数','进入五档次数','移出五档次数','今日比率重置起点UTC（空为未重置）','买盘净加单率百分比','卖盘净加单率百分比','逐档增减与比率JSON','方向未知股','有效成交分母股','计入净委托估算','估算状态','成交方向及时间依据JSON']];
+        for(const w of result?.windows||[])rows.push([code,w.start,w.end,w.confirmed_at,w.source_trade_volume_shares,w.bid.added_shares,w.bid.cancellation_shares,w.bid.net_change_shares,w.bid.addition_rate_pct,w.bid.reduction_rate_pct,w.ask.added_shares,w.ask.cancellation_shares,w.ask.net_change_shares,w.ask.addition_rate_pct,w.ask.reduction_rate_pct,w.source_span_start,w.source_span_end,w.sampling_crosses_boundary,w.sample_pairs,'成交前可见价位估计/未知；盘口收到时间近似',w.visibility_counts?.in_five_same_price,w.visibility_counts?.entered_five,w.visibility_counts?.left_five,result?.rate_reset_at||'',w.bid.net_addition_rate_pct,w.ask.net_addition_rate_pct,JSON.stringify(w.levels||[]),w.ambiguous_trade_shares,w.bid.denominator_trade_shares,w.included_in_cumulative,w.trade_coverage,JSON.stringify(w.trade_decisions||[])]);
         download(`${code}_成交更新逐档统计_${time}.csv`,csvText(rows),'text/csv;charset=utf-8');
       } else if (mode === 'stats') {
-        const rows=[['股票','会话启动UTC','数据截至UTC（按窗口顺序累计）','已核对盘口时间UTC','盘口侧','累计加单股','观察减少股','净加单股','共同累计成交分母股','增加成交比百分比','减少成交比百分比','成交更新结算次数','排除区间','撤单率','成交方向归因','今日比率重置起点UTC（空为未重置）','净加单率百分比','撤单股']];
-        for(const point of result?.timeline||[])for(const side of ['bid','ask']){const m=point[side];rows.push([code,sessions.get(code)?.started_at,point.at,point.through,side,m.added_shares,m.observed_reduction_shares,m.net_change_shares,m.denominator_trade_shares,m.addition_rate_pct,m.reduction_rate_pct,point.confirmed_intervals,point.excluded_intervals,m.reduction_rate_pct,'成交更新逐档结算',result?.rate_reset_at||'',m.net_addition_rate_pct,m.cancellation_shares]);}
+        const rows=[['股票','会话启动UTC','数据截至UTC（按窗口顺序累计）','已核对盘口时间UTC','盘口侧','累计加单股','观察减少股','净加单股','共同累计成交分母股','增加成交比百分比','减少成交比百分比','成交更新结算次数','排除区间','撤单率','成交方向归因','今日比率重置起点UTC（空为未重置）','净加单率百分比','撤单股','全量已收成交股','估计主动买入股','估计主动卖出股','方向未知股','算法版本']];
+        for(const point of result?.timeline||[])for(const side of ['bid','ask']){const m=point[side];rows.push([code,sessions.get(code)?.started_at,point.at,point.through,side,m.added_shares,m.observed_reduction_shares,m.net_change_shares,m.denominator_trade_shares,m.addition_rate_pct,m.reduction_rate_pct,point.confirmed_intervals,point.excluded_intervals,m.reduction_rate_pct,'相邻快照净补/净撤回估算',result?.rate_reset_at||'',m.net_addition_rate_pct,m.cancellation_shares,point.source_trade_volume_shares,point.active_buy_shares,point.active_sell_shares,point.ambiguous_trade_shares,11]);}
         download(`${code}_方向中立累计统计_${time}.csv`,csvText(rows),'text/csv;charset=utf-8');
       } else {
-        download(`${code}_盘口成交原始记录_${time}.json`,JSON.stringify({schema_version:10,code,exported_at:stamp(),units:'数量股、价格元；ISO时间含时区',limitations:'按成交更新区间观察到的唯一价格侧归成交；五档外及歧义成交仅计分母。进出五档不推断加撤。非交易所逐笔委托统计。同指纹记录不能区分无唯一ID的源修订。',calculation:{version:10,window_ms:null,confirmed_at_semantics:'本次成交明细更新收到时间；各段分别结算并累加，不按固定秒数分窗',trade_attribution:'unique_observed_price_side_per_detail_update',queue_flow:'added=sum_positive_visible_deltas+max(0,executed-observed_reduction); cancellation=max(0,observed_reduction-executed)',reduction_ratio:'cancellation_shares / denominator_trade_shares * 100',addition_ratio:'added_shares / denominator_trade_shares * 100',net_change:'added_shares - cancellation_shares',net_addition_ratio:'net_change_shares / denominator_trade_shares * 100',zero_trade_ratio:null,settlement_delay_ms:0,update_mode:'new_detail_rows_or_successful_empty_response',time_basis:'成交明细首次收到时间触发结算；盘口逐次正负变化累计；历史选点仅使用当时已收到的数据'},session:sessions.get(code),derived_rate_reset_at:result?.rate_reset_at||null,statistics:result,events:c.events,ticks:[...c.ticks.values()]},null,2),'application/json;charset=utf-8');
+        download(`${code}_盘口成交原始记录_${time}.json`,JSON.stringify({schema_version:11,code,exported_at:stamp(),units:'数量股、价格元；ISO时间含时区',limitations:result?.limitations||'相邻快照及已收成交估算，非交易所逐委托；无唯一ID的源修订不能完全区分。',calculation:{version:11,window_ms:null,confirmed_at_semantics:'相邻后帧收到时间；updated_at为已用成交资料到达时间',trade_attribution:'pretrade_visible_price_estimate_or_unknown',queue_flow:'net=(after-before)+attributed_received_executions; positive/negative parts are estimates, not gross orders',reduction_ratio:'estimated_negative_net / same_eligible_interval_trade_volume * 100',addition_ratio:'estimated_positive_net / same_eligible_interval_trade_volume * 100',net_change:'estimated_positive_net - estimated_negative_net',zero_trade_ratio:null,update_mode:'every_adjacent_snapshot_with_late_trade_backfill',time_basis:'成交按实际时间归属；盘口收到时间为源时间缺失的近似；历史选点排除后来收到的数据'},session:sessions.get(code),derived_rate_reset_at:result?.rate_reset_at||null,statistics:result,events:c.events,ticks:[...c.ticks.values()]},null,2),'application/json;charset=utf-8');
       }
     } catch (e) { $('bookRecordStatus').textContent = '导出失败：' + e.message; }
   }
@@ -1697,6 +1672,6 @@ window.addEventListener('blur',()=>{if(chartGesture)finishChartGesture();else if
 // Tap toggling happens only on pointerup, never on the synthetic click after a swipe.
 </script>
 
-	<script src="./ui-parity.js?v=ed2dae0dc5e1021c"></script>
+	<script src="./ui-parity.js?v=444aeccb46a7db98"></script>
 </body>
 </html>

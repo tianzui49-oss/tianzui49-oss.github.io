@@ -127,6 +127,27 @@ test('盘口已在11:00结束、成交响应迟到11:20：水平延伸从11:00�
   h.dom.window.close();
 });
 
+test('v11成交柱按实际成交分钟而非后帧或收到时间，并单列灰色未知量', () => {
+  const row = interval('10:30:59', '10:31:02', 100);
+  row.trades = [{time:at('10:30:59'),direction:'buy',volume:100},{time:at('10:30:59'),direction:'unknown',volume:200}];
+  row.flowEligible=true;
+  const h=load([row]);
+  const bars=[...h.d.querySelectorAll('[data-kind="active"] rect[data-minute]')];
+  assert.equal(bars.length,2);assert.ok(bars.every(x=>x.getAttribute('data-minute')==='60'));
+  assert.equal(bars.find(x=>x.getAttribute('data-kind')==='unknown').getAttribute('fill'),'#8a919d');
+  assert.notEqual(bars[0].getAttribute('x'),bars[1].getAttribute('x'),'buy/unknown bars do not cover each other');
+  h.dom.window.close();
+});
+
+test('无估算覆盖的区间有灰色遮罩，不在tooltip冒充确定加撤量', () => {
+  const row=interval('10:30:00','10:30:03');row.spans=[];row.flowEligible=false;row.bidAdded=null;row.bidNet=null;row.activeUnknown=100;
+  row.trades=[{time:at('10:30:01'),direction:'unknown',volume:100}];
+  const h=load([row]);assert.ok(h.d.querySelectorAll('.book-wave-gap').length>=3);
+  assert.match(h.slide('10:30:03').text,/此时未观测/);
+  assert.equal(h.d.querySelectorAll('[data-kind="active"] rect[data-kind="unknown"]').length,1);
+  h.dom.window.close();
+});
+
 test('14:10停止后次日凌晨收到缓存成交：不能把尾线折回09:30，须向右到15:00', () => {
   const a = interval('13:57:20', '14:09:55', 300);
   const b = interval('14:09:55', '14:10:54', 500);

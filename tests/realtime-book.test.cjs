@@ -1,134 +1,40 @@
 'use strict';
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const vm = require('node:vm');
+const test=require('node:test'),assert=require('node:assert/strict');
+const {Audit,iso,session,depth,response,tick,calculate,plain}=require('./helpers.cjs');
 
-const html = fs.readFileSync(require('node:path').join(__dirname, '../index.html'), 'utf8');
-function loadExport(name) {
-  const start = html.indexOf(`const ${name} = (() => {`);
-  assert(start >= 0, `${name} not found`);
-  const end = html.indexOf(`})();`, start);
-  assert(end >= 0, `${name} end not found`);
-  const code = html.slice(start, end + 5) + `\nglobalThis.__out = ${name};`;
-  const ctx = { console, Date, Math, Number, String, Set, Map, Array, Object, JSON, Infinity };
-  vm.createContext(ctx); vm.runInContext(code, ctx, { filename: 'index.html' });
-  return ctx.__out;
-}
-const Calc = loadExport('BookThreeSecondCalculator');
-const Audit = loadExport('BookStatisticsAudit');
-const sid = 'rt-fixture', code = 'ABC', day = '2026-10-21';
-const iso = t => new Date(t).toISOString();
-const base = Date.parse(`${day}T01:30:00Z`);
-const W0 = Math.floor(base / 3000) * 3000;
-const W1 = W0 + 3000;
-function rows(bid1=100, ask1=102, bidVol=100, askVol=200) {
-  return [1,2,3,4,5].map((level,i)=>({side:'bid',level,price:bid1-i,volume:level===1?bidVol:50}))
-    .concat([1,2,3,4,5].map((level,i)=>({side:'ask',level,price:ask1+i,volume:level===1?askVol:60})));
-}
-function expectedChanges(oldRows, newRows) {
-  const out=[];
-  for (const side of ['bid','ask']) {
-    const b=new Map(oldRows.filter(x=>x.side===side).map(x=>[x.price,x.volume]));
-    const a=new Map(newRows.filter(x=>x.side===side).map(x=>[x.price,x.volume]));
-    for(const [p,v] of b) {
-      if(!a.has(p)) out.push({side,price:p,before_shares:v,after_shares:null,delta_shares:null});
-      else if(a.get(p)!==v) out.push({side,price:p,before_shares:v,after_shares:a.get(p),delta_shares:a.get(p)-v});
-    }
-    for(const [p,v] of a) if(!b.has(p)) out.push({side,price:p,before_shares:null,after_shares:v,delta_shares:null});
-  }
-  return out;
-}
-function depth(t, r, prev, extra={}) {
-  return {kind:'depth',session_id:sid,segment_id:extra.segment_id||'seg',received_at:iso(t),gap_limit_ms:5000,
-    ...(extra.gap_warning ? {gap_warning:true}:{}), payload:{rows:r}, changes:prev?expectedChanges(prev,r):[]};
-}
-function session(){return {id:sid,code,day,started_at:iso(W0)};}
-function tick(t, recv, volume, marker='tick') {
-  return {id:marker,code,first_received_at:iso(recv),row:{time:t/1000,price:100,volume,raw_marker:marker}};
-}
-function pairWindows({late=false}={}) {
-  const r0=rows(), r1=rows(100,102,110,195), r2=rows(100,102,106,202), r3=rows(100,102,111,202);
-  r2[4].price=95; // 96 leaves and 95 enters: visibility, not common statistic
-  const events=[depth(W0+100,r0),depth(W0+2100,r1,r0),depth(W1+100,r2,r1),depth(W1+2100,r3,r2)];
-  const ticks=[tick(W0+1000,W0+2200,5,'old'),tick(W1+1000,W1+2200,7,'new')];
-  if(late) ticks.push(tick(W0+1500,W1+2300,9,'late-old-window'));
-  return {events,ticks};
-}
-
-test('未到3秒且无 tick_response：盘口增减/进入移出立即有结果', () => {
-  const r0=rows(), r1=rows(100,102,110,195); r1[7].price=107; // one ask price leaves and another enters; all five prices remain unique
-  const out=Calc.calculate([depth(W0+100,r0),depth(W0+2100,r1,r0)],[],session());
-  assert.equal(out.windows.length,1); assert.equal(out.windows[0].window_open,true);
-  assert.equal(out.windows[0].trade_coverage,'awaiting_coverage');
-  assert.equal(out.windows[0].bid.added_shares,10);
-  assert.ok(out.visibility_changes.some(x=>x.visibility_state==='entered_five'||x.visibility_state==='left_five'));
+test('短于三秒也逐帧成窗，不等待固定桶或收到成交才显示',()=>{
+ const r=calculate([depth(0),depth(.2,{volumes:{'bid:10':100100}}),depth(.6,{volumes:{'bid:10':100300}})]);
+ assert.equal(r.windows.length,2);assert.equal(r.windows[0].bid.visible_added_shares,100);assert.equal(r.windows[1].bid.visible_added_shares,200);assert.equal(r.timeline.at(-1).bid.visible_added_shares,300);assert.equal(r.timeline.at(-1).bid.added_shares,null);
 });
-
-test('第一次成交响应不阻塞盘口窗口', () => {
-  const {events}=pairWindows(); events.push({kind:'tick_response',session_id:sid,received_at:iso(W0+2500),payload_metadata:{bounds:{mode:'available-day',day}}});
-  const open=Calc.calculate(events,[],session(),W0+2500);
-  assert.equal(open.windows.length,1); assert.equal(open.windows[0].trade_coverage,'response_received_not_final');
-  const out=Calc.calculate(events,[],session());
-  assert.equal(out.windows.length,2); assert.equal(out.windows[0].trade_coverage,'awaiting_coverage');
-  assert.equal(out.windows[0].confirmed_at,iso(W1+2100));
+test('迟到成交使旧区间和后续累计一起更新，无重复归属',()=>{
+ const e=[depth(0),depth(1),depth(2),response(4)],a=tick(.5,100,{recv:3,id:'first'}),b=tick(.7,200,{recv:4,id:'late'});
+ const before=calculate(e,[a]),after=calculate(e,[a,b]);assert.equal(before.windows[0].source_trade_volume_shares,100);assert.equal(after.windows[0].source_trade_volume_shares,300);assert.equal(after.timeline.at(-1).source_trade_volume_shares,300);assert.equal(after.timeline.at(-1).active_sell_shares,300);
 });
-
-test('迟到成交回补旧窗口，并更新后续累计', () => {
-  const a=pairWindows(), before=Calc.calculate(a.events,a.ticks,session());
-  const after=Calc.calculate(a.events,[...a.ticks,tick(W0+1500,W1+2300,9,'late-old-window')],session());
-  assert.equal(before.windows[0].source_trade_volume_shares,5);
-  assert.equal(after.windows[0].source_trade_volume_shares,14);
-  assert.equal(after.timeline[1].source_trade_volume_shares,21);
-  assert.equal(after.windows[0].updated_at,after.as_of);
+test('缺口、无效帧、跨段和午休阻止快照补偿，成交不会被丢弃',()=>{
+ for(const variant of ['gap','invalid','segment']){
+  const a=depth(0),b=depth(1);if(variant==='gap')b.gap_warning=true;if(variant==='invalid')b.payload.rows[0].volume=-1;if(variant==='segment')b.segment_id='other';
+  const r=calculate([a,b,response(2)],[tick(.5,100,{recv:2})]);assert.equal(r.matched_intervals_count,0);assert.equal(r.source_trade_volume_shares,100);assert.equal(r.ambiguous_trade_shares,100);assert.equal(r.eligible_trade_volume_shares,0);
+ }
+ const r=calculate([depth(7199),depth(12601,{limit:45000}),response(12602)],[tick(12600,100,{recv:12602})]);assert.equal(r.matched_intervals_count,0);
 });
-
-test('乱序 events/ticks 与重复 calculate 幂等', () => {
-  const a=pairWindows(), ordered=Calc.calculate(a.events,a.ticks,session());
-  const shuffled=Calc.calculate([a.events[3],a.events[0],a.events[2],a.events[1]],[a.ticks[1],a.ticks[0]],session());
-  assert.deepEqual(shuffled,ordered);
-  assert.deepEqual(Calc.calculate(a.events,a.ticks,session()),Calc.calculate(a.events,a.ticks,session()));
+test('五档内相同价格即使档位变化也计算挂量差',()=>{
+ const a=depth(0),b=depth(1,{bid:10.01,ask:10.02,volumes:{'bid:10':100700}}),r=calculate([a,b,response(2)]);
+ const z=r.windows[0].levels.find(x=>x.side==='bid'&&x.price===10);assert.equal(z.before_level,1);assert.equal(z.after_level,2);assert.equal(z.net_change_shares,700);
 });
-
-test('cutoff 历史不泄漏未来盘口/成交', () => {
-  const a=pairWindows(); const cutoff=W0+2200;
-  const out=Calc.calculate(a.events,a.ticks,session(),cutoff);
-  assert.equal(out.windows.length,1);
-  assert.equal(out.windows[0].source_trade_volume_shares,5);
-  assert.equal(out.windows[0].source_trade_rows,1);
-  assert.ok(!JSON.stringify(out).includes('new'));
+test('乱序成交不改变窗口结果，重复calculate是纯函数',()=>{
+ const e=[depth(0),depth(1),depth(2),response(3)],ts=[tick(.8,100,{recv:3,id:'b'}),tick(.3,200,{recv:3,id:'a'})];
+ assert.deepEqual(plain(calculate(e,ts)),plain(calculate([...e].reverse(),[...ts].reverse())));assert.deepEqual(plain(calculate(e,ts)),plain(calculate(e,ts)));
 });
-
-test('零成交率为 null；缺口、无效帧、跨段不强算', () => {
-  const a=pairWindows();
-  const zero=Calc.calculate(a.events,[],session());
-  assert.equal(zero.windows[0].bid.addition_rate_pct,null);
-  const gap=pairWindows(); gap.events[2].gap_warning=true;
-  assert.equal(Calc.calculate(gap.events,[],session()).windows.length,1);
-  const invalid=pairWindows(); invalid.events[1].payload.rows[0].volume=-1;
-  assert.equal(Calc.calculate(invalid.events,[],session()).windows.length,1);
-  const cross=pairWindows(); cross.events[2].segment_id='other';
-  assert.equal(Calc.calculate(cross.events,[],session()).windows.length,1);
-  for(const x of [gap,invalid,cross]) assert.ok(Calc.calculate(x.events,[],session()).excluded_intervals>0);
+test('非法盘口价格顺序和null数量不会被当成有效0',()=>{
+ const a=depth(0),b=depth(1);b.payload.rows[0].volume=null;assert.equal(calculate([a,b]).matched_intervals_count,0);
+ const c=depth(1);[c.payload.rows[0].price,c.payload.rows[1].price]=[c.payload.rows[1].price,c.payload.rows[0].price];assert.equal(calculate([a,c]).matched_intervals_count,0);
 });
-
-test('窗口内价位后来移出：共同价位口径重算，不把外部余量算作降量', () => {
-  const a=pairWindows(), out=Calc.calculate(a.events,[],session());
-  const w1=out.windows[1];
-  assert.equal(w1.bid.observed_reduction_shares,4);
-  assert.ok(w1.visibility_counts.left_five>=1 && w1.visibility_counts.entered_five>=1);
-  assert.ok(!w1.visibility_details.some(x=>x.price===96 && x.statistics_eligible));
+test('原始变化行被篡改时，独立审计检出，不只核对自己输出',()=>{
+ const e=[depth(0),depth(1,{volumes:{'bid:10':100100}}),response(2)];e[1].changes=[{side:'bid',price:10,delta_shares:999}];const r=calculate(e),a=Audit.calculate(e,[],session,r);assert.equal(a.windows[0].status,'mismatch');
 });
-
-test('原始 depth changes 按帧生成，独立审计可通过且可发现漏回补/篡改旧窗口', () => {
-  const a=pairWindows({late:true}), result=Calc.calculate(a.events,a.ticks,session());
-  const audit=Audit.calculate(a.events,a.ticks,session(),result);
-  assert.deepEqual(Array.from(audit.windows, x=>x.status),['pass','pass']);
-  const tam=JSON.parse(JSON.stringify(result)); tam.windows[0].source_trade_volume_shares++;
-  assert.equal(Audit.calculate(a.events,a.ticks,session(),tam).windows[0].status,'mismatch');
-  const bad=JSON.parse(JSON.stringify(a.events)); bad[1].changes[0].delta_shares++;
-  assert.equal(Audit.calculate(bad,a.ticks,session(),result).windows[0].status,'mismatch');
-  const noLate=Calc.calculate(a.events,a.ticks.filter(x=>x.id!=='late-old-window'),session());
-  const oldTampered=JSON.parse(JSON.stringify(result)); oldTampered.windows[0].source_trade_volume_shares=noLate.windows[0].source_trade_volume_shares;
-  assert.equal(Audit.calculate(a.events,a.ticks,session(),oldTampered).windows[0].status,'mismatch');
+test('零数量成交有记录但不生成除零比率；负数成交排除',()=>{
+ const e=[depth(0),depth(1),response(2)],r=calculate(e,[tick(.5,0,{recv:2}),tick(.7,-100,{recv:2})]);assert.equal(r.source_trade_volume_shares,0);assert.equal(r.windows[0].source_trade_rows,1);assert.equal(r.windows[0].bid.addition_rate_pct,null);
+});
+test('14位北京时间成交与秒级成交共享实际时间归属',()=>{
+ const t=tick(.5,100,{recv:2});t.row.time='20261117093000';const r=calculate([depth(0),depth(1),response(2)],[t]);assert.equal(r.source_trade_volume_shares,100);assert.equal(r.ambiguous_trade_shares,100);assert.equal(r.trade_decisions[0].trade_time,iso(0));assert.equal(Audit.calculate([depth(0),depth(1),response(2)],[t],session,r).global_quantity_check,'pass');
 });

@@ -1,61 +1,42 @@
 'use strict';
-// Run after `npm install --prefix tests`, then `node tests/realtime-ui.test.cjs`.
-const fs = require('node:fs');
-const path = require('node:path');
-const assert = require('node:assert/strict');
-const {JSDOM} = require('jsdom');
-const {indexedDB, IDBKeyRange} = require('fake-indexeddb');
-const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
-const body = html.replace(/<script[\s\S]*?<\/script>/gi, '');
-const mainScript = [...html.matchAll(/<script>([\s\S]*?)<\/script>/gi)].pop()[1];
-const wait = ms => new Promise(r => setTimeout(r, ms));
-const base = Date.parse('2026-10-22T01:31:00Z');
-const rows = (n=0) => ['bid','ask'].flatMap(side => [1,2,3,4,5].map(level => ({side, level,
-  price: side==='bid' ? 10-(level-1)/10 : 10+level/10,
-  volume: level===1 ? 1000+n : 1000})));
-(async () => {
-  const dom = new JSDOM(body, {url:'https://test.invalid/', runScripts:'outside-only', pretendToBeVisual:true});
-  try {
-    const w=dom.window;
-    Object.assign(w, {indexedDB, IDBKeyRange, __now:base});
-    w.eval(`const NativeDate=Date; Date=class extends NativeDate { constructor(...args){super(...(args.length?args:[window.__now]));} static now(){return window.__now;} };`);
-    const calls=[];
-    const payload=(kind,n=0,ticks=[])=>({source:'THSDK',code:'600000',fetched_at:new w.Date().toISOString(),
-      bounds:{mode:'available-day',day:'2026-10-22'},rows:kind==='depth'?rows(n):ticks});
-    w.fetch=async url=>{const kind=String(url).includes('/api/depth')?'depth':'ticks';calls.push(kind);return {ok:true,json:async()=>payload(kind)};};
-    w.setInterval=(fn,ms)=>({fn,ms}); w.clearInterval=()=>{};
-    w.eval(mainScript+'\nwindow.__test={state,bookRecorder,watchlist};marketPhase=()=>({open:true,label:"交易时段",day:"2026-10-22"});');
-    const api=w.__test;
-    api.state.code='600000';api.state.chartDate='2026-10-22';
-    await api.bookRecorder.begin('600000');await wait(40);
-    const capture=async(kind,n,ticks=[])=>{api.bookRecorder.capture(kind,payload(kind,n,ticks));await wait(30);};
-    const text=id=>w.document.getElementById(id).textContent;
-    w.__now=base+500;await capture('depth',100);
-    assert.equal(w.document.querySelectorAll('#bookThreeRows tr').length,1,'open bucket must be displayed immediately');
-    assert.match(text('bookBidAdditionDetail'),/观察增加 1 手/);
-    assert.equal(w.document.querySelector('#bookThreeRows tr').children[2].textContent,'1');
-    w.__now=base+700;await capture('depth',300);
-    assert.match(text('bookBidAdditionDetail'),/观察增加 3 手/,'no 900ms recompute throttle');
-    assert.equal(w.document.querySelector('#bookThreeRows tr').children[2].textContent,'3','same bucket ID must repaint revised quantities');
-    w.__now=base+3500;await capture('depth',400);
-    w.__now=base+3800;await capture('ticks',0,[{time:(base+400)/1000,price:10,volume:200}]);
-    assert.match(text('bookThreeSource'),/共同成交量 2 手/,'late trade must backfill cumulative denominator');
-    const oldRow=[...w.document.querySelectorAll('#bookThreeRows tr')].at(-1);
-    assert.equal(oldRow.children[1].textContent,'2','old row must repaint late trade');
-    assert.match(text('bookAuditStatus'),/差异 0 窗/);
-    api.bookRecorder.viewAt('2026-10-22 09:31:01');
-    assert.match(text('bookBidAdditionDetail'),/观察增加 3 手/);
-    assert.match(text('bookThreeSource'),/共同成交量 0 手/,'historical view must exclude later trade receipt');
-    api.bookRecorder.viewAt(null);
-    assert.match(text('bookThreeSource'),/共同成交量 2 手/,'return to live must restore backfilled result');
-    // Deliberately hidden document: app code must not pause book/tick polling.
-    Object.defineProperty(w.document,'hidden',{configurable:true,get:()=>true});
-    api.state.code='000001';await api.bookRecorder.begin('000001');await wait(30);
-    w.__now=base+10000; const before=calls.length;api.bookRecorder.heartbeat();await wait(30);
-    assert.ok(calls.length>before,'background page must continue attempting collection');
-    api.bookRecorder.setPaused(true);await wait(20);
-    const pausedCalls=calls.length;w.__now+=10000;api.bookRecorder.heartbeat();await wait(20);
-    assert.equal(calls.length,pausedCalls,'explicit pause remains respected');
-    console.log('PASS: open-window display, <900ms update, same-row repaint, late-trade backfill, audit, history isolation, background attempts, explicit pause');
-  } finally { dom.window.close(); }
-})().catch(e=>{console.error(e);process.exitCode=1;});
+const test=require('node:test'),assert=require('node:assert/strict');
+const {harness,base,wait}=require('./ui-harness.cjs');
+
+test('未结算仍立即显示可见变化，估算字段显示—而不是0',async()=>{
+ const h=await harness();try{
+  await h.capture('depth',.5,{volumes:{'bid:10':100100}});
+  assert.match(h.text('bookBidAdditionDetail'),/观察增加 1 手/);assert.match(h.text('bookBidAdditionDetail'),/加单 — 手/);
+  assert.equal(h.w.document.querySelector('#bookSideBid [data-field="added"] dd').textContent,'—');assert.ok(h.w.document.querySelectorAll('#bookThreeRows tr').length>=1);
+  await h.capture('depth',.7,{volumes:{'bid:10':100300}});assert.match(h.text('bookBidAdditionDetail'),/观察增加 3 手/);assert.match(h.text('bookThreeSummary'),/等待成交资料/);
+ }finally{h.close();}
+});
+test('后到成交补偿旧区间，选点不读取未来响应；返回最新恢复',async()=>{
+ const h=await harness();try{
+  await h.capture('depth',1,{volumes:{'bid:10':60000}});
+  const records=[{time:(base+500)/1000,price:10,volume:70000}];await h.capture('ticks',2,{records});
+  assert.match(h.text('bookBidAdditionDetail'),/加单 300 手/);assert.match(h.text('bookBidAdditionDetail'),/净加单 300 手/);assert.match(h.text('bookThreeSource'),/有效成交分母：700 手/);
+  h.api.bookRecorder.viewAt('2026-11-17 09:30:01');await wait(25);assert.match(h.text('bookBidAdditionDetail'),/加单 — 手/);assert.equal(h.w.__bookWaveData.windows.reduce((n,w)=>n+w.volume,0),0);
+  h.api.bookRecorder.viewAt(null);await wait(25);assert.match(h.text('bookBidAdditionDetail'),/加单 300 手/);assert.equal(h.w.__bookWaveData.windows.reduce((n,w)=>n+w.volume,0),70000);
+ }finally{h.close();}
+});
+test('隐藏文档不等于暂停；用户明确暂停后停止请求',async()=>{
+ const h=await harness();try{
+  Object.defineProperty(h.w.document,'hidden',{configurable:true,get:()=>true});h.w.__now=base+10000;
+  const before=h.calls.length;h.api.bookRecorder.heartbeat();await wait(40);assert.ok(h.calls.length>before);
+  h.api.bookRecorder.setPaused(true);await wait(30);const stopped=h.calls.length;h.w.__now+=10000;h.api.bookRecorder.heartbeat();await wait(30);assert.equal(h.calls.length,stopped);
+ }finally{h.close();}
+});
+test('导出v11保留原始记录并包含未知量、方向时间依据和覆盖口径',async()=>{
+ const h=await harness();try{
+  await h.capture('depth',1);await h.capture('depth',2);await h.capture('ticks',3,{records:[{time:(base+1500)/1000,price:10,volume:100}]});
+  await h.api.bookRecorder.exportData('json');const data=JSON.parse(h.w.__export.text);assert.equal(data.schema_version,11);assert.equal(data.calculation.version,11);assert.ok(data.events.some(e=>e.kind==='depth'));assert.equal(data.ticks.length,1);assert.equal(data.statistics.trade_decisions.length,1);assert.equal(data.statistics.integrity_audit.global_quantity_check,'pass');
+  await h.api.bookRecorder.exportData('three');assert.match(h.w.__export.text,/方向未知股/);assert.match(h.w.__export.text,/有效成交分母股/);
+  await h.api.bookRecorder.exportData('stats');assert.match(h.w.__export.text,/算法版本/);assert.match(h.w.__export.text,/方向未知股/);
+ }finally{h.close();}
+});
+test('平均每笔改为去极值后总量/总笔数，而不是聚合行等权平均',async()=>{
+ const h=await harness();try{
+  const rows=[{price:10,volume:100},{price:10,volume:1000},{price:20,volume:4000},{price:10,volume:10000}],counts=new h.w.Map(rows.map((r,i)=>[r,[1,1,20,1][i]]));
+  const result=h.api.tickRowStats(rows,counts);assert.equal(result.remaining,2);assert.equal(result.remainingTrades,21);assert.equal(result.averageLots,5000/21/100);assert.equal(result.averageAmount,90000/21/10000);
+ }finally{h.close();}
+});
