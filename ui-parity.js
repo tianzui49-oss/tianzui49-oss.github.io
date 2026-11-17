@@ -165,7 +165,7 @@
     status.id = 'bookWaveStatus'; status.setAttribute('role', 'status');
     const grid = make('div', 'book-wave-grid');
     const tip = make('div', 'book-wave-tip'); tip.hidden = true; tip.setAttribute('aria-hidden', 'true');
-    const panels = [['added', '净补单估算详细图'], ['cancelled', '净撤回估算详细图'], ['net', '净委托估算累计图'], ['active', '估计主动买卖与未知成交图']].map(([kind, name]) => {
+    const panels = [['added', '净补单速率偏差图（近1分钟−累计均速）'], ['cancelled', '净撤回速率偏差图（近1分钟−累计均速）'], ['net', '净委托估算累计图'], ['active', '逐笔买卖方向估计图']].map(([kind, name]) => {
       const cell = make('div', 'book-wave-cell'); cell.dataset.kind = kind;
       const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: 'none', role: 'img', 'aria-label': name });
       svg.append(svgEl('rect', { x: 0, y: 0, width: W, height: H, fill: '#fff' }));
@@ -183,7 +183,7 @@
     const legend = make('p', 'small book-wave-legend');
     const swatch = (color, dashed) => { const s = make('span', 'book-wave-swatch'); s.style.background = dashed ? 'repeating-linear-gradient(90deg,#b8c0cc 0 4px,transparent 4px 7px)' : color; return s; };
     legend.append(swatch(RED), '红线＝买盘（黑线上方）　', swatch(GREEN), '绿线＝卖盘（黑线下方）。',
-      make('br'), '净补/净撤图为有效覆盖区间的估算，非真实新增/撤单总量；灰色区是缺失/待确认，平线只保持累计位置，不表示0变化。净委托图为有效覆盖累计。成交柱按实际成交分钟：红＝估计买入，绿＝估计卖出，灰＝方向未知；不按响应收到分钟绘制。');
+      make('br'), '前两图是近1分钟净补/净撤速率减累计均速，非累计数量；第三图是逐价净委托累计。部分价位不可见/待资料另有诊断，平线只保持显示位置，不表示0变化。成交柱按实际分钟：红＝估计买入，绿＝估计卖出；浅色段是已含其中的低依据推断，不是第三类量。');
     section.append(title, status, grid, legend);
 
     let model = { pts: [], real: [], bars: null, t0: null }, latest = null, drawQueued = false, active = null, lastHover = null;
@@ -198,9 +198,9 @@
       const t0 = Number.isFinite(started) ? Math.max(open, started) : firstSpan ? firstSpan[0] : Number.isFinite(rows[0].start) ? rows[0].start : rows[0].end;
       const zeroDev = Object.fromEntries(KEYS.map(k => [k, 0]));
       const anchors = [{ t: open, dev: zeroDev, net: { bid: 0, ask: 0 }, hold: true }, { t: t0, dev: zeroDev, net: { bid: 0, ask: 0 }, hold: true }], real = [], parts = [], coverage = [];
-      const cum = { obs: 0, bidNet: 0, askNet: 0, activeBuy: 0, activeSell: 0, activeUnknown: 0, volume: 0, ...zeroDev }, win = { obs: 0, ...zeroDev };
+      const cum = { obs: 0, bidNet: 0, askNet: 0, activeBuy: 0, activeSell: 0, activeUnknown: 0, activeWeak: 0, activeForced: 0, volume: 0, ...zeroDev }, win = { obs: 0, ...zeroDev };
       let covered = t0, j = 0;
-      const bars = { buy: new Float64Array(240), sell: new Float64Array(240), unknown: new Float64Array(240), has: new Uint8Array(240) };
+      const bars = { buy: new Float64Array(240), sell: new Float64Array(240), unknown: new Float64Array(240), weakBuy: new Float64Array(240), weakSell: new Float64Array(240), forced: new Float64Array(240), has: new Uint8Array(240) };
       rows.forEach((w, i) => {
         const spans = (w.spans || []).filter(s => Number.isFinite(s[0]) && Number.isFinite(s[1]) && s[1] >= s[0]).map(([a, b]) => [Math.max(open, a), Math.min(w.end, close, b)]).filter(([a, b]) => b >= a).sort((a, b) => a[0] - b[0]);
         let observed = 0;
@@ -218,8 +218,8 @@
         const rate = {}, avg = {}, dev = {};
         for (const k of KEYS) { rate[k] = win[k] / Math.max(win.obs, 1000) * ROLL_MS; avg[k] = cum[k] / Math.max(cum.obs, 1000) * ROLL_MS; dev[k] = j === 0 ? 0 : rate[k] - avg[k]; }
         cum.bidNet += Number(w.bidNet) || 0; cum.askNet += Number(w.askNet) || 0;
-        cum.activeBuy += Number(w.activeBuy) || 0; cum.activeSell += Number(w.activeSell) || 0; cum.activeUnknown += Number(w.activeUnknown) || 0; cum.volume += Number(w.volume) || 0;
-        const point = { t: w.end, w, dev, rate, avg, net: { bid: cum.bidNet, ask: cum.askNet }, cum: { activeBuy: cum.activeBuy, activeSell: cum.activeSell, activeUnknown: cum.activeUnknown, volume: cum.volume } };
+        cum.activeBuy += Number(w.activeBuy) || 0; cum.activeSell += Number(w.activeSell) || 0; cum.activeUnknown += Number(w.activeUnknown) || 0; cum.activeWeak += Number(w.activeWeak) || 0; cum.activeForced += Number(w.activeForced) || 0; cum.volume += Number(w.volume) || 0;
+        const point = { t: w.end, w, dev, rate, avg, net: { bid: cum.bidNet, ask: cum.askNet }, cum: { activeBuy: cum.activeBuy, activeSell: cum.activeSell, activeUnknown: cum.activeUnknown, activeWeak: cum.activeWeak, activeForced: cum.activeForced, volume: cum.volume } };
         // Queue-flow values belong to the actual snapshot span, not a delayed trade-response arrival.
         const plotAt = Math.max(anchors[anchors.length - 1].t, spans.length ? Math.min(w.end, spans[spans.length - 1][1]) : w.end);
         anchors.push({ ...point, t: plotAt }); real.push(point);
@@ -228,9 +228,9 @@
           for (const trade of w.trades) {
             if (!Number.isFinite(trade.time) || trade.time < open || trade.time > close) continue;
             const m = minuteIndex(trade.time), direction = ['buy', 'sell'].includes(trade.direction) ? trade.direction : 'unknown';
-            bars[direction][m] += Number(trade.volume) || 0; bars.has[m] = 1;
+            const qty=Number(trade.volume)||0;bars[direction][m] += qty;if(trade.lowConfidence&&['buy','sell'].includes(direction))bars[direction==='buy'?'weakBuy':'weakSell'][m]+=qty;if(trade.forcedAssignment)bars.forced[m]+=qty;bars.has[m] = 1;
           }
-        } else if (data.version !== 11) {
+        } else if (!data.version || data.version < 11) {
           // Display compatibility for in-memory pre-v11 wave fixtures only. New exports always carry event times.
           const m = minuteIndex(w.end);bars.buy[m] += Number(w.activeBuy) || 0;bars.sell[m] += Number(w.activeSell) || 0;bars.unknown[m] += Number(w.activeUnknown) || 0;bars.has[m] = 1;
         }
@@ -309,8 +309,9 @@
           if (!b.has[m]) continue;
           for (const [v, color, kind] of [[b.buy[m], RED, 'buy'], [b.sell[m], GREEN, 'sell'], [b.unknown[m], '#8a919d', 'unknown']].filter(x => x[0] > 0).sort((x, y) => y[0] - x[0])) {
             const h = v / top * (MID - 2);
-            const offset = {buy:0,sell:1,unknown:2}[kind];
-            nodes.push(svgEl('rect', { x: (m * bw + offset * bw / 3 + 0.03).toFixed(2), y: (MID - h).toFixed(2), width: (bw * 0.28).toFixed(2), height: h.toFixed(2), fill: color, 'data-kind': kind, 'data-minute': m }));
+            const binary=Number(latest?.version)>=12,offset={buy:0,sell:1,unknown:2}[kind],slot=binary?bw/2:bw/3;
+            nodes.push(svgEl('rect', { x: (m * bw + offset * slot + 0.03).toFixed(2), y: (MID - h).toFixed(2), width: (slot * 0.84).toFixed(2), height: h.toFixed(2), fill: color, 'data-kind': kind, 'data-minute': m }));
+            const weak=kind==='buy'?b.weakBuy[m]:kind==='sell'?b.weakSell[m]:0;if(binary&&weak>0)nodes.push(svgEl('rect',{x:(m*bw+offset*slot+0.03).toFixed(2),y:(MID-h).toFixed(2),width:(slot*0.84).toFixed(2),height:(Math.min(v,weak)/top*(MID-2)).toFixed(2),fill:'#fff',opacity:0.5,'data-weak-direction':kind,'data-minute':m}));
           }
         }
       }
@@ -323,7 +324,7 @@
         status.textContent = data.day === data.today ? `${data.day}：暂无已结算的观测记录。交易时段保持页面打开即从开始观测的时刻画起；也可在上方切换到本机有记录的交易日查看。` : `${data.day}：本机没有这一天的观测记录，无法画图，不用其他日期代替。`;
         return;
       }
-      status.textContent = `${data.day}｜${clock(model.t0)}（北京时间）开始观测｜${n.toLocaleString('zh-CN')} 个相邻/未覆盖区间｜灰区资料不足；方向是报价估计${data.selected_at ? '｜四图与统计均截止 ' + data.selected_at : ''}｜${data.live ? '随记录实时更新' : '本机记录'}`;
+      status.textContent = `${data.day}｜${clock(model.t0)}（北京时间）开始观测｜${n.toLocaleString('zh-CN')} 个相邻/未覆盖区间｜灰区无队列覆盖/待资料；方向逐笔二元估计，弱依据单列${data.selected_at ? '｜四图与统计均截止 ' + data.selected_at : ''}｜${data.live ? '随记录实时更新' : '本机记录'}`;
     }
     function draw() {
       drawQueued = false;
@@ -362,16 +363,16 @@
         !p ? '本日暂无已结算观测记录。' : target < model.t0 ? `尚未开始观测；起点 ${clock(model.t0)}。` : target > model.real[model.real.length - 1].t ? `最后已结算记录 ${clock(model.real[model.real.length - 1].t)}；之后尚无观测结果。` : '观测中断；此时没有可比较的盘口记录。',
         '水平线仅保持显示位置，不表示成交或挂单变化为0。',
         '不使用附近记录冒充该时刻的成交、加单或撤单。',
-        ...(index === 3 && model.bars ? (() => { const m=Math.min(239,Math.max(0,Math.floor(minuteOf(target)))),b=model.bars;return b.has[m]?[`${minuteLabel(m)} 已收实际成交分钟：估计买入 ${lots(b.buy[m])} · 估计卖出 ${lots(b.sell[m])} · 方向未知 ${lots(b.unknown[m])} 手（盘口覆盖不足）`]:[]; })() : [])
+        ...(index === 3 && model.bars ? (() => { const m=Math.min(239,Math.max(0,Math.floor(minuteOf(target)))),b=model.bars;return b.has[m]?[`${minuteLabel(m)} 已收实际成交分钟：估计买入 ${lots(b.buy[m])} · 估计卖出 ${lots(b.sell[m])} · 低依据 ${lots(b.weakBuy[m]+b.weakSell[m])} 手，初始化 ${lots(b.forced[m])} 手（已含买卖量；队列覆盖不足）`]:[]; })() : [])
       ] : [
         `${clock(p.t)}（北京时间）· 本次成交 ${lots(w.volume)} 手`,
-        `估计买入 ${lots(w.activeBuy)} 手 · 估计卖出 ${lots(w.activeSell)} 手 · 方向未知 ${lots(w.activeUnknown)} 手`,
+        `估计买入 ${lots(w.activeBuy)} 手 · 估计卖出 ${lots(w.activeSell)} 手 · 低依据 ${lots(w.activeWeak)} 手，初始化 ${lots(w.activeForced)} 手（已含买卖量）`,
         `买盘估算：净补单 ${lots(w.bidAdded)} · 净撤回 ${lots(w.bidCancelled)} · 净委托 ${signed(w.bidNet)}`,
         `卖盘估算：净补单 ${lots(w.askAdded)} · 净撤回 ${lots(w.askCancelled)} · 净委托 ${signed(w.askNet)}`,
         `近1分钟/平均（手/分钟）：买加 ${lots(p.rate.bidAdded)}/${lots(p.avg.bidAdded)} · 买撤 ${lots(p.rate.bidCancelled)}/${lots(p.avg.bidCancelled)}`,
         `卖加 ${lots(p.rate.askAdded)}/${lots(p.avg.askAdded)} · 卖撤 ${lots(p.rate.askCancelled)}/${lots(p.avg.askCancelled)}`,
-        `${minuteLabel(m)} 实际成交分钟：估计买入 ${lots(b.buy[m])} · 估计卖出 ${lots(b.sell[m])} · 未知 ${lots(b.unknown[m])}`,
-        `累计估算：买盘净委托 ${signed(p.net.bid)} · 卖盘净委托 ${signed(p.net.ask)} · 估计买入 ${lots(p.cum.activeBuy)} · 估计卖出 ${lots(p.cum.activeSell)} · 未知 ${lots(p.cum.activeUnknown)}`
+        `${minuteLabel(m)} 实际成交分钟：估计买入 ${lots(b.buy[m])} · 估计卖出 ${lots(b.sell[m])} · 低依据 ${lots(b.weakBuy[m]+b.weakSell[m])}，初始化 ${lots(b.forced[m])}`,
+        `累计估算：买盘净委托 ${signed(p.net.bid)} · 卖盘净委托 ${signed(p.net.ask)} · 估计买入 ${lots(p.cum.activeBuy)} · 估计卖出 ${lots(p.cum.activeSell)} · 低依据 ${lots(p.cum.activeWeak)}，初始化 ${lots(p.cum.activeForced)}`
       ];
       tip.replaceChildren(...lines.map(text => make('div', '', text)));
       tip.hidden = false;
@@ -423,7 +424,7 @@
       ['netRate', '净委托率（估算）', /净加单率\s+(.+?)(?:；|。|$)/],
       ['reduced', '合计减少（手）', /(?:观察|合计)减少\s+(.+?)\s*手/],
       ['tradeCredit', '成交抵扣（手）', /(?:成交解释|成交抵扣)\s+(.+?)\s*手/],
-      ['volume', '有效成交分母（手）', /共同成交分母\s+(.+?)\s*手/]
+      ['volume', '共同成交分母（全部已收，手）', /共同成交分母\s+(.+?)\s*手/]
     ];
     for (const [suffix, label] of [['Bid', '买盘'], ['Ask', '卖盘']]) {
       const card = make('section', 'book-side-card');
@@ -484,7 +485,7 @@
     const at = byId('bookFlowAt'), volume = byId('bookFlowVolume');
     const instant = byId('bookFlowInstant'), coverage = byId('bookFlowCoverage'), unknown = byId('bookFlowUnknown');
     flow.removeAttribute('style'); flow.className = 'book-comparison';
-    flow.replaceChildren(make('h2', 'book-comparison-title', '相邻五档净委托估算 · v11'), at, volume, metricsGrid, unknown, instant, coverage, buildBookWaves());
+    flow.replaceChildren(make('h2', 'book-comparison-title', '相邻五档净委托估算 · v12'), at, volume, metricsGrid, unknown, instant, coverage, buildBookWaves());
 
     const records = make('section', 'card');
     records.id = 'bookRecordsPanel';
@@ -495,7 +496,7 @@
     const originalBody = byId('bookThreeRows');
     const originalWrap = originalBody.closest('.table-wrap');
     const sourceDetails = make('details', 'book-record-source');
-    sourceDetails.append(make('summary', '', '逐档估算、未知方向与覆盖依据（扩展）'), originalWrap);
+    sourceDetails.append(make('summary', '', '逐价估算、二元方向与弱依据（扩展）'), originalWrap);
     const tableViews = make('div', 'book-side-grid'); tableViews.id = 'bookTradeDetailGrid';
     const headers = ['相邻快照/未覆盖成交区间（北京）', '资料更新时间（北京）', '本区间已收成交（手）', '可见增加（手）', '可见减少（手）', '成交补偿（手）', '净补单估算（手）', '净撤回估算（手）', '净委托估算（手）', '净补率（估算）', '净撤率（估算）', '净委托率（估算）'];
     const views = [];

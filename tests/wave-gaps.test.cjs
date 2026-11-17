@@ -11,21 +11,21 @@ function interval(start, end, net = 100) {
   return { start: at(start), end: at(end), spans: [[at(start), at(end)]], volume: 100,
     activeBuy: 60, activeSell: 40, bidAdded: net, askAdded: net, bidCancelled: 0, askCancelled: 0, bidNet: net, askNet: net };
 }
-function load(windows) {
+function load(windows,version) {
   const dom = new JSDOM('<!doctype html><body></body>', { runScripts: 'outside-only' });
   const w = dom.window, d = w.document;
   w.requestAnimationFrame = cb => { cb(); return 1; };
   w.__bookWaveData = { code: '600513', day: '2026-11-13', today: '2026-11-14', live: false,
-    started_at: '2026-11-13T10:30:00+08:00', windows };
+    started_at: '2026-11-13T10:30:00+08:00', version, windows };
   w.eval(`const make=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n;};\n${code}\ndocument.body.append(buildBookWaves());`);
   const svgs = [...d.querySelectorAll('svg')];
   for (const svg of svgs) svg.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 240 });
   d.querySelector('.book-wave-grid').getBoundingClientRect = () => ({ left: 0, top: 0 });
-  function slide(time) {
+  function slide(time,index=0) {
     const t = at(time), m = (t - at('09:30:00')) / 60000 - (t >= at('13:00:00') ? 90 : 0);
     const e = new w.Event('pointermove');
     Object.assign(e, { pointerType: 'mouse', clientX: m / 240 * 400, clientY: 10 });
-    svgs[0].dispatchEvent(e);
+    svgs[index].dispatchEvent(e);
     return { text: d.querySelector('.book-wave-tip').textContent,
       crosses: [...d.querySelectorAll('.book-wave-cross')].map(n => ({ x: +n.getAttribute('x1'), shown: n.getAttribute('display') !== 'none' })) };
   }
@@ -148,6 +148,20 @@ test('无估算覆盖的区间有灰色遮罩，不在tooltip冒充确定加撤�
   h.dom.window.close();
 });
 
+test('v12按实际分钟绘制两类买卖，低依据浅段已含在柱内不生成未知第三类',()=>{
+ const row=interval('10:30:59','10:31:02',100);row.activeBuy=300;row.activeSell=100;row.activeWeak=200;row.flowEligible=true;
+ row.trades=[{time:at('10:30:59'),direction:'buy',volume:300,lowConfidence:true},{time:at('10:30:59'),direction:'sell',volume:100,lowConfidence:false}];
+ const h=load([row],12),bars=[...h.d.querySelectorAll('[data-kind="active"] rect[data-kind]')];
+ assert.equal(bars.length,2);assert.ok(bars.every(b=>b.dataset.minute==='60'));assert.equal(h.d.querySelectorAll('rect[data-kind="unknown"]').length,0);
+ assert.equal(h.d.querySelectorAll('rect[data-weak-direction="buy"]').length,1);assert.notEqual(bars[0].getAttribute('x'),bars[1].getAttribute('x'));
+ assert.match(h.slide('10:31:02').text,/低依据/);assert.match(h.d.body.textContent,/速率偏差图/);h.dom.window.close();
+});
+test('v12缺队列覆盖仍展示已收二元成交分钟柱',()=>{
+ const row=interval('10:30:00','10:30:03');row.spans=[];row.flowEligible=false;row.bidAdded=null;row.bidNet=null;
+ row.trades=[{time:at('10:30:01'),direction:'sell',volume:100,lowConfidence:true,forcedAssignment:true}];
+ const h=load([row],12);assert.equal(h.d.querySelectorAll('rect[data-kind="sell"]').length,1);assert.equal(h.d.querySelectorAll('rect[data-kind="unknown"]').length,0);
+ const text=h.slide('10:30:03',3).text;assert.match(text,/低依据/);assert.match(text,/初始化/);assert.match(text,/此时未观测/);h.dom.window.close();
+});
 test('14:10停止后次日凌晨收到缓存成交：不能把尾线折回09:30，须向右到15:00', () => {
   const a = interval('13:57:20', '14:09:55', 300);
   const b = interval('14:09:55', '14:10:54', 500);

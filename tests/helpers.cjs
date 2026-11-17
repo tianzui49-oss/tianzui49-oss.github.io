@@ -8,7 +8,7 @@ const Calc=embedded('BookThreeSecondCalculator',"if (typeof module !== 'undefine
 const Audit=embedded('BookStatisticsAudit',"if(typeof module!=='undefined')module.exports=BookStatisticsAudit;");
 const base=Date.parse('2026-11-17T09:30:00+08:00');
 const iso=second=>new Date(base+second*1000).toISOString();
-const session={id:'adjacent-v11',code:'600036',day:'2026-11-17',started_at:iso(0)};
+const session={id:'adjacent-v12',code:'600036',day:'2026-11-17',started_at:iso(0)};
 function depth(second,options={}){
  const bid=options.bid??10,ask=options.ask??10.01;
  const rows=['bid','ask'].flatMap(side=>Array.from({length:5},(_,i)=>{const price=Number((side==='bid'?bid-i*.01:ask+i*.01).toFixed(2));return {side,level:i+1,price,volume:options.volumes?.[side+':'+price]??100000};}));

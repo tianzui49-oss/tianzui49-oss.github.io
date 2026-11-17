@@ -13,7 +13,7 @@ test('迟到成交使旧区间和后续累计一起更新，无重复归属',()=
 test('缺口、无效帧、跨段和午休阻止快照补偿，成交不会被丢弃',()=>{
  for(const variant of ['gap','invalid','segment']){
   const a=depth(0),b=depth(1);if(variant==='gap')b.gap_warning=true;if(variant==='invalid')b.payload.rows[0].volume=-1;if(variant==='segment')b.segment_id='other';
-  const r=calculate([a,b,response(2)],[tick(.5,100,{recv:2})]);assert.equal(r.matched_intervals_count,0);assert.equal(r.source_trade_volume_shares,100);assert.equal(r.ambiguous_trade_shares,100);assert.equal(r.eligible_trade_volume_shares,0);
+  const r=calculate([a,b,response(2)],[tick(.5,100,{recv:2})]);assert.equal(r.matched_intervals_count,0);assert.equal(r.source_trade_volume_shares,100);assert.equal(r.ambiguous_trade_shares,0);assert.equal(r.active_buy_shares+r.active_sell_shares,100);assert.equal(r.denominator_trade_shares,100);assert.equal(r.eligible_trade_volume_shares,0);
  }
  const r=calculate([depth(7199),depth(12601,{limit:45000}),response(12602)],[tick(12600,100,{recv:12602})]);assert.equal(r.matched_intervals_count,0);
 });
@@ -36,5 +36,5 @@ test('零数量成交有记录但不生成除零比率；负数成交排除',()=
  const e=[depth(0),depth(1),response(2)],r=calculate(e,[tick(.5,0,{recv:2}),tick(.7,-100,{recv:2})]);assert.equal(r.source_trade_volume_shares,0);assert.equal(r.windows[0].source_trade_rows,1);assert.equal(r.windows[0].bid.addition_rate_pct,null);
 });
 test('14位北京时间成交与秒级成交共享实际时间归属',()=>{
- const t=tick(.5,100,{recv:2});t.row.time='20261117093000';const r=calculate([depth(0),depth(1),response(2)],[t]);assert.equal(r.source_trade_volume_shares,100);assert.equal(r.ambiguous_trade_shares,100);assert.equal(r.trade_decisions[0].trade_time,iso(0));assert.equal(Audit.calculate([depth(0),depth(1),response(2)],[t],session,r).global_quantity_check,'pass');
+ const t=tick(.5,100,{recv:2});t.row.time='20261117093000';const r=calculate([depth(0),depth(1),response(2)],[t]);assert.equal(r.source_trade_volume_shares,100);assert.equal(r.ambiguous_trade_shares,0);assert.equal(r.forced_direction_shares,100);assert.equal(r.trade_decisions[0].trade_time,iso(0));assert.equal(Audit.calculate([depth(0),depth(1),response(2)],[t],session,r).global_quantity_check,'pass');
 });

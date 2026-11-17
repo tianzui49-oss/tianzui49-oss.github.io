@@ -9,6 +9,8 @@ const html = fs.readFileSync(__dirname + '/../clear-local.html', 'utf8');
 const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/gi)].at(-1)[1];
 const DB = 'thsdk-orderbook-recorder-v1';
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+async function waitUntil(predicate,label='UI condition') { const until=Date.now()+3000;while(Date.now()<until){if(predicate())return;await wait(5);}assert.ok(predicate(),label+' timed out'); }
+async function previewReady(w) { await waitUntil(()=>!el(w,'confirmation').hidden,'read-only preview'); }
 const req = request => new Promise((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
 const txDone = tx => new Promise((resolve, reject) => { tx.oncomplete = resolve; tx.onabort = () => reject(tx.error); tx.onerror = () => reject(tx.error); });
 
@@ -60,8 +62,8 @@ async function ready(dom) {
 const el = (w, id) => w.document.getElementById(id);
 const checked = (w, name, value) => { const x = [...w.document.querySelectorAll(`input[name="${name}"]`)].find(i => i.value === value); assert.ok(x, `${name}=${value} missing`); x.checked = true; };
 const click = (w, id) => el(w, id).click();
-const confirm = async w => { checked(w, 'stock', '600000'); checked(w, 'day', '2026-10-22'); click(w, 'previewButton'); await wait(10); checked(w, 'closedPages', ''); };
-async function confirmVisible(w) { el(w, 'closedPages').checked = true; el(w, 'closedPages').dispatchEvent(new w.Event('change', { bubbles: true })); click(w, 'confirmButton'); await wait(20); }
+const confirm = async w => { checked(w, 'stock', '600000'); checked(w, 'day', '2026-10-22'); click(w, 'previewButton'); await previewReady(w); checked(w, 'closedPages', ''); };
+async function confirmVisible(w) { await previewReady(w);el(w, 'closedPages').checked = true; el(w, 'closedPages').dispatchEvent(new w.Event('change', { bubbles: true })); click(w, 'confirmButton'); await waitUntil(()=>/清理完成|预览后记录已变化|未能确认清理完成/.test(el(w,'status').textContent),'cleanup completion or safe refusal'); }
 function tick(code, time, extra = {}) { return { code, row: { time, price: 10, volume: 1 }, ...extra }; }
 function event(code, received_at, kind, extra = {}) { return { code, received_at, kind, ...extra }; }
 function latest(code, received_at, extra = {}) { return { code, received_at, rows: [{ side: 'bid', level: 1, price: 10, volume: 1 }], ...extra }; }
@@ -75,7 +77,7 @@ test('指定股票指定日期只删除交集，预览和取消均不改数据',
     events: [{ key: 'd', value: event('600000', '2026-10-22T01:00:00Z', 'depth') }], latest: []
   });
   const dom = makeEnv({ 'thsdk-last-valid-depth-v1:600000': JSON.stringify({ source: 'THSDK', code: '600000', fetched_at: '2026-10-22T01:00:00Z', rows: [] }) });
-  try { const w = dom.window; await ready(dom); checked(w, 'stock', '600000'); checked(w, 'day', '2026-10-22'); click(w, 'previewButton'); await wait(10);
+  try { const w = dom.window; await ready(dom); checked(w, 'stock', '600000'); checked(w, 'day', '2026-10-22'); click(w, 'previewButton'); await previewReady(w);
     assert.equal(el(w, 'confirmation').hidden, false); assert.match(el(w, 'summary').textContent, /600000/); assert.match(el(w, 'summary').textContent, /2026-10-22/);
     assert.match(el(w, 'status').textContent, /仅预览/); click(w, 'cancelButton'); await wait(5); assert.match(el(w, 'status').textContent, /已取消/);
     assert.equal(el(w, 'confirmation').hidden, true); assert.equal((await readDb()).ticks.length, 3); assert.ok(w.localStorage.getItem('thsdk-last-valid-depth-v1:600000'));
@@ -89,12 +91,12 @@ test('同日全部股票、选股全部日期、北京时间当天和一键全�
   ], events: [], latest: [] });
   const dom = makeEnv();
   try { const w = dom.window; await ready(dom);
-    checked(w, 'day', '2026-10-22'); w.document.querySelector('input[name="stockMode"][value="all"]').click(); click(w, 'previewButton'); await wait(10);
+    checked(w, 'day', '2026-10-22'); w.document.querySelector('input[name="stockMode"][value="all"]').click(); click(w, 'previewButton'); await previewReady(w);
     assert.equal(el(w, 'previewRows').querySelectorAll('tr').length, 2); click(w, 'cancelButton');
-    checked(w, 'stock', '600000'); w.document.querySelector('input[name="stockMode"][value="selected"]').click(); w.document.querySelector('input[name="dateMode"][value="all"]').click(); click(w, 'previewButton'); await wait(10);
+    checked(w, 'stock', '600000'); w.document.querySelector('input[name="stockMode"][value="selected"]').click(); w.document.querySelector('input[name="dateMode"][value="all"]').click(); click(w, 'previewButton'); await previewReady(w);
     assert.equal(el(w, 'previewRows').querySelectorAll('tr').length, 2); click(w, 'cancelButton');
   click(w, 'todayButton'); assert.equal(el(w, 'customDay').value, new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10));
-    click(w, 'allButton'); await wait(10); assert.equal(el(w, 'confirmation').hidden, false); assert.match(el(w, 'summary').textContent, /全部股票/); assert.match(el(w, 'summary').textContent, /全部日期/); click(w, 'cancelButton');
+    click(w, 'allButton'); await previewReady(w); assert.equal(el(w, 'confirmation').hidden, false); assert.match(el(w, 'summary').textContent, /全部股票/); assert.match(el(w, 'summary').textContent, /全部日期/); click(w, 'cancelButton');
   } finally { dom.window.close(); }
 });
 
@@ -106,7 +108,7 @@ test('确认删除指定范围，并保留未选日期、未知 schema、分时�
   const beforeUnknown = { foo: 'keep', nested: [1, 2] }; await seedDb({ 'unknown-store': [{ key: 'u', value: beforeUnknown }] });
   const local = { 'thsdk-chart-history-v1:600000': 'chart', 'stock-search-history-v1': '["x"]', 'stock-watchlist-v1': JSON.stringify([{ code: '600000', name: '浦发银行' }]), 'other': 'unchanged' };
   const dom = makeEnv(local);
-  try { const w = dom.window; await ready(dom); checked(w, 'stock', '600000'); checked(w, 'day', '2026-10-22'); click(w, 'previewButton'); await wait(10); await confirmVisible(w);
+  try { const w = dom.window; await ready(dom); checked(w, 'stock', '600000'); checked(w, 'day', '2026-10-22'); click(w, 'previewButton'); await previewReady(w); await confirmVisible(w);
     assert.match(el(w, 'status').textContent, /清理完成/); const db = await readDb(); assert.deepEqual(db.ticks.map(x => x.key), ['keep', 'unknown']); assert.equal(db.events.length, 0); assert.deepEqual(db['unknown-store'][0].value, beforeUnknown);
     assert.equal(w.localStorage.getItem('thsdk-chart-history-v1:600000'), 'chart'); assert.equal(w.localStorage.getItem('stock-search-history-v1'), '["x"]'); assert.equal(w.localStorage.getItem('stock-watchlist-v1'), local['stock-watchlist-v1']); assert.equal(w.localStorage.getItem('other'), 'unchanged');
   } finally { dom.window.close(); }
@@ -118,8 +120,8 @@ test('逐笔按源日，日期未知只在全部日期中可删除', async () =>
     { key: 'source', value: tick('600000', '20261022000100') }, { key: 'unknown', value: tick('600000', 'not-a-time') }
   ], events: [], latest: [] });
   const dom = makeEnv();
-  try { const w = dom.window; await ready(dom); checked(w, 'stock', '600000'); checked(w, 'day', '2026-10-22'); click(w, 'previewButton'); await wait(10); assert.equal(el(w, 'previewRows').querySelectorAll('tr').length, 1); assert.match(el(w, 'summary').textContent, /2026-10-22/); click(w, 'cancelButton');
-    w.document.querySelector('input[name="stockMode"][value="selected"]').click(); w.document.querySelector('input[name="dateMode"][value="all"]').click(); click(w, 'previewButton'); await wait(10); assert.equal(el(w, 'previewRows').querySelectorAll('tr').length, 2); assert.match(el(w, 'summary').textContent, /日期不明/); click(w, 'cancelButton');
+  try { const w = dom.window; await ready(dom); checked(w, 'stock', '600000'); checked(w, 'day', '2026-10-22'); click(w, 'previewButton'); await previewReady(w); assert.equal(el(w, 'previewRows').querySelectorAll('tr').length, 1); assert.match(el(w, 'summary').textContent, /2026-10-22/); click(w, 'cancelButton');
+    w.document.querySelector('input[name="stockMode"][value="selected"]').click(); w.document.querySelector('input[name="dateMode"][value="all"]').click(); click(w, 'previewButton'); await previewReady(w); assert.equal(el(w, 'previewRows').querySelectorAll('tr').length, 2); assert.match(el(w, 'summary').textContent, /日期不明/); click(w, 'cancelButton');
   } finally { dom.window.close(); }
 });
 
@@ -137,7 +139,7 @@ test('latest 各形式、depth local cache 和 cutoff 只匹配源日条目', as
     'stock-derived-rate-cutoffs-v1': JSON.stringify({ '2026-10-22': { '600000': '2026-10-22T01:00:00Z', '000001': '2026-10-23T01:00:00Z' }, '2026-10-23': { '600000': '2026-10-23T01:00:00Z' } })
   };
   const dom = makeEnv(local);
-  try { const w = dom.window; await ready(dom); checked(w, 'stock', '600000'); checked(w, 'day', '2026-10-22'); click(w, 'previewButton'); await wait(10);
+  try { const w = dom.window; await ready(dom); checked(w, 'stock', '600000'); checked(w, 'day', '2026-10-22'); click(w, 'previewButton'); await previewReady(w);
     assert.equal(el(w, 'previewRows').querySelectorAll('tr').length, 1); assert.match(el(w, 'summary').textContent, /共 6 条/); assert.match(el(w, 'previewRows').textContent, /五档实时快照明细/); assert.equal(el(w, 'confirmation').hidden, false); click(w, 'cancelButton');
     assert.ok(w.localStorage.getItem('thsdk-last-valid-depth-v1:000001')); assert.match(w.localStorage.getItem('stock-derived-rate-cutoffs-v1'), /2026-10-23/);
   } finally { dom.window.close(); }
@@ -145,14 +147,14 @@ test('latest 各形式、depth local cache 和 cutoff 只匹配源日条目', as
 
 test('改范围会取消预览；取消按钮和确认按钮状态符合 UI', async () => {
   await seedDb({ ticks: [{ key: 'a', value: tick('600000', '20261022093000') }], events: [], latest: [] }); const dom = makeEnv();
-  try { const w = dom.window; await ready(dom); checked(w, 'stock', '600000'); checked(w, 'day', '2026-10-22'); click(w, 'previewButton'); await wait(10); assert.equal(el(w, 'confirmation').hidden, false); el(w, 'closedPages').dispatchEvent(new w.Event('change'));
+  try { const w = dom.window; await ready(dom); checked(w, 'stock', '600000'); checked(w, 'day', '2026-10-22'); click(w, 'previewButton'); await previewReady(w); assert.equal(el(w, 'confirmation').hidden, false); el(w, 'closedPages').dispatchEvent(new w.Event('change'));
     el(w, 'dateChoices').querySelector('input').dispatchEvent(new w.Event('change', { bubbles: true })); assert.equal(el(w, 'confirmation').hidden, true); assert.equal(el(w, 'confirmButton').disabled, true); assert.match(el(w, 'status').textContent, /范围已更改/);
   } finally { dom.window.close(); }
 });
 
 test('预览后并发写入导致确认拒绝且不删除', async () => {
   await seedDb({ ticks: [{ key: 'a', value: tick('600000', '20261022093000') }], events: [], latest: [] }); const dom = makeEnv();
-  try { const w = dom.window; await ready(dom); checked(w, 'stock', '600000'); checked(w, 'day', '2026-10-22'); click(w, 'previewButton'); await wait(10);
+  try { const w = dom.window; await ready(dom); checked(w, 'stock', '600000'); checked(w, 'day', '2026-10-22'); click(w, 'previewButton'); await previewReady(w);
     const db = await openDb(); const tx = db.transaction('ticks', 'readwrite'); tx.objectStore('ticks').put(tick('600000', '20261022093100'), 'concurrent'); await txDone(tx); db.close(); await confirmVisible(w);
     assert.match(el(w, 'status').textContent, /预览后记录已变化/); assert.equal((await readDb()).ticks.length, 2);
   } finally { dom.window.close(); }
@@ -195,7 +197,7 @@ for (const mode of ['stock-day', 'stock-all-days', 'all-stocks-day', 'today', 'e
         if(mode==='stock-all-days')w.document.querySelector('input[name="dateMode"][value="all"]').click();else if(mode==='today'){w.Date.now=()=>Date.parse('2026-10-22T16:00:01Z');click(w,'todayButton');assert.equal(el(w,'customDay').value,'2026-10-23');}else checked(w,'day','2026-10-22');
         click(w,'previewButton');
       }
-      await wait(15);assert.equal(el(w,'confirmation').hidden,false);
+      await previewReady(w);assert.equal(el(w,'confirmation').hidden,false);
       assert.deepEqual(await readDb(),before,'预览不能变更数据库');
       for(const [key,value]of Object.entries(local))assert.equal(w.localStorage.getItem(key),value,'预览不能变更 '+key);
       await confirmVisible(w);assert.match(el(w,'status').textContent,/^清理完成/);
@@ -223,7 +225,7 @@ for (const mode of ['stock-day', 'stock-all-days', 'all-stocks-day', 'today', 'e
 test('本地缓存写入失败会明确报告数据库已提交，不宣称全部成功',async()=>{
   await seedDb({ticks:[{key:'t',value:tick('600000','20261022093000')}],events:[],latest:[]});
   const dom=makeEnv({'stock-derived-rate-cutoffs-v1':JSON.stringify({'2026-10-22':{'600000':'2026-10-22T01:00:00Z'}})});
-  try{const w=dom.window;await ready(dom);checked(w,'stock','600000');checked(w,'day','2026-10-22');click(w,'previewButton');await wait(15);
+  try{const w=dom.window;await ready(dom);checked(w,'stock','600000');checked(w,'day','2026-10-22');click(w,'previewButton');await previewReady(w);
     const original=w.Storage.prototype.setItem;w.Storage.prototype.setItem=function(key,value){if(key==='stock-derived-rate-cutoffs-v1')throw new w.DOMException('test quota','QuotaExceededError');return original.call(this,key,value);};
     await confirmVisible(w);assert.match(el(w,'status').textContent,/未能确认清理完成.*数据库记录已提交删除/);assert.equal((await readDb()).ticks.length,0);assert.ok(w.localStorage.getItem('stock-derived-rate-cutoffs-v1').includes('600000'));
   }finally{dom.window.close();}
