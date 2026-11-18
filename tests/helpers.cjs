@@ -16,6 +16,8 @@ function depth(second,options={}){
 }
 function response(second,options={}){return {kind:'tick_response',code:session.code,session_id:session.id,segment_id:'continuous',received_at:iso(second),row_count:options.count??0,payload_metadata:{bounds:{mode:'available-day',day:session.day},history:{complete:options.complete??false},...(options.metadata||{})},...(options.extra||{})};}
 function tick(second,volume,options={}){return {id:options.id||`trade-${second}-${volume}-${options.price??10}`,code:session.code,first_received_at:iso(options.recv??second+1),row:{time:(base+second*1000)/1000,price:options.price??10,volume},...(options.extra||{})};}
+function observationStart(second=0,options={}){return {kind:'stats_start',code:session.code,session_id:session.id,segment_id:options.segment||'continuous',received_at:iso(second),observation_started_at:iso(second),session,...(options.extra||{})};}
+function pulse(second,options={}){return {kind:'observation_heartbeat',code:session.code,session_id:session.id,segment_id:options.segment||'continuous',received_at:iso(second),scope_only:true,...(options.extra||{})};}
 const calculate=(events,ticks=[],cutoff=Infinity)=>Calc.calculate(events,ticks,session,cutoff);
 const plain=value=>JSON.parse(JSON.stringify(value));
-module.exports={Calc,Audit,base,iso,session,depth,response,tick,calculate,plain,html};
+module.exports={Calc,Audit,base,iso,session,depth,response,tick,calculate,plain,html,observationStart,pulse};

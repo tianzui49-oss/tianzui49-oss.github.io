@@ -10,10 +10,10 @@ test('迟到成交使旧区间和后续累计一起更新，无重复归属',()=
  const e=[depth(0),depth(1),depth(2),response(4)],a=tick(.5,100,{recv:3,id:'first'}),b=tick(.7,200,{recv:4,id:'late'});
  const before=calculate(e,[a]),after=calculate(e,[a,b]);assert.equal(before.windows[0].source_trade_volume_shares,100);assert.equal(after.windows[0].source_trade_volume_shares,300);assert.equal(after.timeline.at(-1).source_trade_volume_shares,300);assert.equal(after.timeline.at(-1).active_sell_shares,300);
 });
-test('缺口、无效帧、跨段和午休阻止快照补偿，成交不会被丢弃',()=>{
+test('队列缺口/无效帧不缩小观察分母，跨采集段与午休空档不补造观察',()=>{
  for(const variant of ['gap','invalid','segment']){
   const a=depth(0),b=depth(1);if(variant==='gap')b.gap_warning=true;if(variant==='invalid')b.payload.rows[0].volume=-1;if(variant==='segment')b.segment_id='other';
-  const r=calculate([a,b,response(2)],[tick(.5,100,{recv:2})]);assert.equal(r.matched_intervals_count,0);assert.equal(r.source_trade_volume_shares,100);assert.equal(r.ambiguous_trade_shares,0);assert.equal(r.active_buy_shares+r.active_sell_shares,100);assert.equal(r.denominator_trade_shares,100);assert.equal(r.eligible_trade_volume_shares,0);
+  const r=calculate([a,b,response(2)],[tick(.5,100,{recv:2})]);const expected=variant==='segment'?0:100;assert.equal(r.matched_intervals_count,0);assert.equal(r.source_trade_volume_shares,expected);assert.equal(r.ambiguous_trade_shares,0);assert.equal(r.active_buy_shares+r.active_sell_shares,expected);assert.equal(r.denominator_trade_shares,expected);assert.equal(r.eligible_trade_volume_shares,0);if(variant==='segment')assert.equal(r.excluded_unobserved_trade_volume_shares,100);
  }
  const r=calculate([depth(7199),depth(12601,{limit:45000}),response(12602)],[tick(12600,100,{recv:12602})]);assert.equal(r.matched_intervals_count,0);
 });

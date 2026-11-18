@@ -1,12 +1,12 @@
 'use strict';
 // v12 acceptance: binary estimates with explicit evidence, per-price queues and common full denominator.
 const test=require('node:test'),assert=require('node:assert/strict');
-const {Calc,Audit,iso,session,depth,response,tick,calculate,plain}=require('./helpers.cjs');
+const {Calc,Audit,iso,session,depth,response,tick,calculate,plain,observationStart}=require('./helpers.cjs');
 const pair=(r)=>r.windows.find(w=>w.window_kind==='adjacent_snapshot');
 
 test('相邻快照独立成窗；未收成交时立即显示可见变化，估算不是0',()=>{
  const r=calculate([depth(0),depth(1,{volumes:{'bid:10':105000}})]),w=pair(r);
- assert.equal(r.version,12);assert.equal(r.windows.length,1);assert.equal(w.bid.visible_added_shares,5000);assert.equal(w.bid.added_shares,null);assert.equal(w.bid.net_change_shares,null);assert.equal(w.trade_coverage,'awaiting_trade_response');assert.equal(r.pending_intervals,1);
+ assert.equal(r.version,13);assert.equal(r.windows.length,1);assert.equal(w.bid.visible_added_shares,5000);assert.equal(w.bid.added_shares,null);assert.equal(w.bid.net_change_shares,null);assert.equal(w.trade_coverage,'awaiting_trade_response');assert.equal(r.pending_intervals,1);
 });
 test('买盘1000→600手，期间卖出700手：净补单300手，恒等式成立',()=>{
  const r=calculate([depth(0),depth(1,{volumes:{'bid:10':60000}}),response(2)],[tick(.5,70000,{recv:2})]),w=pair(r);
@@ -21,11 +21,11 @@ test('成功空响应覆盖同价变化：净撤回可估算，分母0不除零'
  assert.equal(w.bid.cancellation_shares,8);assert.equal(w.bid.net_change_shares,-8);assert.equal(w.bid.addition_rate_pct,null);assert.equal(w.source_complete,false);
 });
 test('无盘口首笔仍二元归类，但必须披露无依据初始化，全部成交作共同分母',()=>{
- const r=calculate([], [tick(1,70000,{recv:2})]);assert.equal(r.active_sell_shares,0);assert.equal(r.active_buy_shares,70000);assert.equal(r.ambiguous_trade_shares,0);assert.equal(r.forced_direction_shares,70000);assert.equal(r.low_confidence_trade_shares,70000);assert.equal(r.trade_decisions[0].reason,'initialization_buy_no_direction_evidence');assert.equal(r.trade_decisions[0].confidence,'very_low');assert.equal(r.eligible_trade_volume_shares,0);assert.equal(r.windows[0].bid.denominator_trade_shares,70000);assert.equal(r.windows[0].bid.added_shares,null);
+ const r=calculate([observationStart(0),response(2)], [tick(1,70000,{recv:2})]);assert.equal(r.active_sell_shares,0);assert.equal(r.active_buy_shares,70000);assert.equal(r.ambiguous_trade_shares,0);assert.equal(r.forced_direction_shares,70000);assert.equal(r.low_confidence_trade_shares,70000);assert.equal(r.trade_decisions[0].reason,'initialization_buy_no_direction_evidence');assert.equal(r.trade_decisions[0].confidence,'very_low');assert.equal(r.eligible_trade_volume_shares,0);assert.equal(r.windows[0].bid.denominator_trade_shares,70000);assert.equal(r.windows[0].bid.added_shares,null);
 });
-test('同价位买侧变卖侧，后续成交只使用其之前的最新快照',()=>{
+test('同价位换侧不一致时按逐笔继承，并同时保留新盘口的相反依据',()=>{
  const r=calculate([depth(0),depth(1,{bid:9.99,ask:10}),depth(2,{bid:10.01,ask:10.02}),response(3)],[tick(.5,100,{recv:3,id:'early'}),tick(1.5,70000,{recv:3,id:'later'})]);
- assert.equal(r.active_sell_shares,100);assert.equal(r.active_buy_shares,70000);assert.equal(r.trade_decisions.find(x=>x.id==='later').side,'ask');
+ assert.equal(r.active_sell_shares,70100);assert.equal(r.active_buy_shares,0);const d=r.trade_decisions.find(x=>x.id==='later');assert.equal(d.side,'bid');assert.equal(d.quote_direction,'buy');assert.equal(d.tick_direction,'sell');assert.equal(d.fusion_status,'conflict_tick_selected');assert.equal(d.quote_updated_since_previous,true);
 });
 test('五档外向上扫单用成交前卖一推断，不用未来新买一反向归侧',()=>{
  const r=calculate([depth(0),depth(1,{bid:10.06,ask:10.07}),response(2)],[tick(.5,70000,{price:10.06,recv:2})]);
@@ -45,7 +45,7 @@ test('迟到成交回补原始成交区间，不新建收到时间窗口',()=>{
 });
 test('交易恰在前帧时刻不使用同时快照反推；端点只归一窗',()=>{
  const r=calculate([depth(0),depth(1),depth(2),response(3)],[tick(0,100,{recv:3,id:'same'}),tick(1,200,{recv:3,id:'end'})]);
- assert.equal(r.source_trade_volume_shares,300);assert.equal(r.ambiguous_trade_shares,0);assert.equal(r.forced_direction_shares,100);assert.equal(r.trade_decisions.find(x=>x.id==='same').quote_at,null);assert.equal(r.trade_decisions.filter(x=>x.id==='end').length,1);assert.equal(pair(r).source_trade_volume_shares,200);
+ assert.equal(r.source_trade_volume_shares,300);assert.equal(r.ambiguous_trade_shares,0);assert.equal(r.forced_direction_shares,300);assert.equal(r.trade_decisions.find(x=>x.id==='same').quote_at,null);assert.equal(r.trade_decisions.find(x=>x.id==='end').fusion_status,'conflict_tick_selected');assert.equal(r.trade_decisions.filter(x=>x.id==='end').length,1);assert.equal(pair(r).source_trade_volume_shares,200);
 });
 test('盘口超过5秒未更新仍输出二元估计，陈旧报价依据降级而非当精确方向',()=>{
  const r=calculate([depth(0),depth(10,{limit:45000}),response(11)],[tick(8,1000,{recv:11})]);
@@ -76,7 +76,7 @@ test('删改主动总量、净委托、累计或价位明细均被审计发现',
  for(const mutate of [x=>{x.windows[0].active_sell_shares=0;},x=>{x.windows[0].bid.added_shares=123;},x=>{x.timeline[0].bid.net_change_shares=123;x.timeline[0].bid.added_shares=123;},x=>{x.windows[0].levels[0].delta_shares++;}]){const altered=plain(r);mutate(altered);assert.equal(Audit.calculate(e,t,session,altered).windows[0].status,'mismatch');}
 });
 test('无盘口全量成交不能审计为覆盖充分',()=>{
- const t=[tick(1,70000,{recv:2})],r=calculate([],t),a=Audit.calculate([],t,session,r);
+ const e=[observationStart(0),response(2)],t=[tick(1,70000,{recv:2})],r=calculate(e,t),a=Audit.calculate(e,t,session,r);
  assert.equal(a.global_quantity_check,'pass');assert.equal(a.windows[0].status,'incomplete');assert.equal(a.windows[0].coverage_check,'partial');
 });
 test('正式完整响应仍明确方向仅为报价估计',()=>{

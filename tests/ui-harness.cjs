@@ -15,12 +15,12 @@ async function harness({presentation=true}={}){
  const rows=(overrides={})=>['bid','ask'].flatMap(side=>[1,2,3,4,5].map(level=>{const price=Number((side==='bid'?10-(level-1)*.01:10+level*.01).toFixed(2));return {side,level,price,volume:overrides[side+':'+price]??100000};}));
  const payload=(kind,records=[],overrides={})=>({source:'THSDK',api:kind==='depth'?'depth':'tick_level1',code:'600036',fetched_at:new w.Date().toISOString(),bounds:{mode:'available-day',day:'2026-11-17'},history:{complete:false},rows:kind==='depth'?rows(overrides):records});
  const calls=[];w.fetch=async url=>{calls.push(String(url));return {ok:true,json:async()=>payload(String(url).includes('/api/depth')?'depth':'ticks')};};
- const amended=main.replace(/function download\(name,text,type\)\{[^\n]+\}/,'function download(name,text,type){window.__export={name,text,type};}');
+ const amended=main.replace(/function download\(name,text,type\)\{[^\n]+\}/,'function download(name,text,type){window.__export={name,text,type};}').replace('return { capture, refresh, compare, begin, pause, heartbeat, viewAt, exportData, syncWatchlist, setPaused,','return { __waitForQueue:()=>queue, capture, refresh, compare, begin, pause, heartbeat, viewAt, exportData, syncWatchlist, setPaused,');
  w.eval(amended+'\nwindow.__test={state,bookRecorder,tickRowStats,tickCountRows,DerivedRateReset,BookThreeSecondCalculator,BookStatisticsAudit};marketPhase=()=>({open:true,label:"交易时段",day:"2026-11-17"});');
  if(presentation)w.eval(ui);
  await wait(20);w.document.getElementById('result').hidden=false;
  const api=w.__test;api.state.code='600036';api.state.chartDate='2026-11-17';await api.bookRecorder.begin('600036');await wait(70);
  async function capture(kind,second,{records=[],volumes={}}={}){w.__now=base+second*1000;api.bookRecorder.capture(kind,payload(kind,records,volumes));await wait(60);}
- return {dom,w,api,capture,calls,payload,base,wait,text:id=>w.document.getElementById(id)?.textContent||'',close:()=>dom.window.close()};
+ return {dom,w,api,capture,calls,payload,base,wait,setNow:second=>{w.__now=base+second*1000;},drain:async()=>{await api.bookRecorder.__waitForQueue();await wait(25);},text:id=>w.document.getElementById(id)?.textContent||'',close:()=>dom.window.close()};
 }
 module.exports={harness,wait,base,html,ui};

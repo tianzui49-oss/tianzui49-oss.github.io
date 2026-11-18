@@ -165,7 +165,7 @@
     status.id = 'bookWaveStatus'; status.setAttribute('role', 'status');
     const grid = make('div', 'book-wave-grid');
     const tip = make('div', 'book-wave-tip'); tip.hidden = true; tip.setAttribute('aria-hidden', 'true');
-    const panels = [['added', '净补单速率偏差图（近1分钟−累计均速）'], ['cancelled', '净撤回速率偏差图（近1分钟−累计均速）'], ['net', '净委托估算累计图'], ['active', '逐笔买卖方向估计图']].map(([kind, name]) => {
+    const panels = [['added', '净补单速率偏差图（近1分钟−累计均速）'], ['cancelled', '净撤回速率偏差图（近1分钟−累计均速）'], ['net', '净委托累计图'], ['active', '逐笔买卖方向图']].map(([kind, name]) => {
       const cell = make('div', 'book-wave-cell'); cell.dataset.kind = kind;
       const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: 'none', role: 'img', 'aria-label': name });
       svg.append(svgEl('rect', { x: 0, y: 0, width: W, height: H, fill: '#fff' }));
@@ -183,12 +183,60 @@
     const legend = make('p', 'small book-wave-legend');
     const swatch = (color, dashed) => { const s = make('span', 'book-wave-swatch'); s.style.background = dashed ? 'repeating-linear-gradient(90deg,#b8c0cc 0 4px,transparent 4px 7px)' : color; return s; };
     legend.append(swatch(RED), '红线＝买盘（黑线上方）　', swatch(GREEN), '绿线＝卖盘（黑线下方）。',
-      make('br'), '前两图是近1分钟净补/净撤速率减累计均速，非累计数量；第三图是逐价净委托累计。部分价位不可见/待资料另有诊断，平线只保持显示位置，不表示0变化。成交柱按实际分钟：红＝估计买入，绿＝估计卖出；浅色段是已含其中的低依据推断，不是第三类量。');
+      make('br'), '前两图为净补/净撤速率偏差，第三图为净委托累计。红线为买盘、绿线为卖盘；成交柱红＝主动买入、绿＝主动卖出，浅色段提示低依据。四图共用数据推进时刻；盘口已观测、成交待同步和未来时段分开提示。计算依据及限制见“加单与撤单统计说明”。');
     section.append(title, status, grid, legend);
 
     let model = { pts: [], real: [], bars: null, t0: null }, latest = null, drawQueued = false, active = null, lastHover = null;
+    function mergeRanges(ranges,open,horizon) {
+      const out=[];
+      for(const [a,b] of ranges.filter(x=>Array.isArray(x)&&Number.isFinite(x[0])&&Number.isFinite(x[1])).map(([a,b])=>[Math.max(open,a),Math.min(horizon,b)]).filter(([a,b])=>b>=a).sort((a,b)=>a[0]-b[0])){
+        const last=out.at(-1);if(last&&a<=last[1])last[1]=Math.max(last[1],b);else out.push([a,b]);
+      }return out;
+    }
+    function inRanges(ranges,t) {let a=0,b=ranges.length;while(a<b){const m=(a+b)>>1;if(ranges[m][1]<t)a=m+1;else b=m;}return !!ranges[a]&&ranges[a][0]<=t;}
+    function buildModern(data,open,close) {
+      const sourceRows=(data.windows||[]).filter(w=>Number.isFinite(w.end)&&w.end>=open&&w.end<=close).sort((a,b)=>a.end-b.end||a.start-b.start);
+      const sourceTrades=(Array.isArray(data.trades)?data.trades:sourceRows.flatMap(w=>w.trades||[])).filter(t=>Number.isFinite(t.time)&&t.time>=open&&t.time<=close&&['buy','sell'].includes(t.direction)&&Number.isFinite(t.volume)&&t.volume>=0).sort((a,b)=>a.time-b.time);
+      const receipt=Number.isFinite(data.observed_until)?data.observed_until:null;
+      const candidates=[...sourceRows.map(w=>w.end),...sourceTrades.map(t=>t.time),...(data.book_points||[]).map(p=>p.at),...(data.trade_ranges||[]).map(r=>r[1])].filter(Number.isFinite);
+      const maximum=candidates.reduce((v,t)=>Math.max(v??-Infinity,t),null);
+      const horizon=receipt===null?maximum:receipt,limited=Number.isFinite(horizon)?Math.max(open,Math.min(close,Number.isFinite(data.cutoff)?data.cutoff:close,horizon)):null;
+      const started=Date.parse(data.started_at),first=candidates.reduce((v,t)=>Math.min(v??Infinity,t),null);
+      const t0=limited===null?null:Math.min(limited,Math.max(open,Number.isFinite(started)?started:Number.isFinite(first)?first:limited));
+      const bars={buy:new Float64Array(240),sell:new Float64Array(240),unknown:new Float64Array(240),weakBuy:new Float64Array(240),weakSell:new Float64Array(240),forced:new Float64Array(240),has:new Uint8Array(240)};
+      if(limited===null)return {modern:true,pts:[],real:[],bars,t0:null,open,close,horizon:null,coverage:[],bookCoverage:[],tradeCoverage:[],bookPoints:[],exactTrades:[]};
+      const rows=sourceRows.filter(w=>w.end<=limited),trades=sourceTrades.filter(t=>t.time<=limited);
+      const bookPoints=(data.book_points||[]).filter(p=>Number.isFinite(p.at)&&p.at>=open&&p.at<=limited).map(p=>p.at).sort((a,b)=>a-b);
+      const bookCoverage=mergeRanges([...(data.book_spans||[]),...rows.flatMap(w=>w.bookSpans||[])],open,limited),tradeCoverage=mergeRanges(data.trade_ranges||[],open,limited),scopeCoverage=mergeRanges((data.observation_periods||[]).map(p=>[p.start,p.end]),open,limited),hasScope=Array.isArray(data.observation_periods);
+      const zero=Object.fromEntries(KEYS.map(k=>[k,0])),anchors=[{t:t0,dev:{...zero},net:{bid:0,ask:0},hold:true}],real=[],parts=[],coverage=[];
+      const cum={obs:0,bidNet:0,askNet:0,activeBuy:0,activeSell:0,activeWeak:0,activeForced:0,volume:0,...zero},win={obs:0,...zero};let covered=t0,j=0;
+      rows.forEach((w,i)=>{
+        const spans=mergeRanges(w.flowEligible===false?[]:w.spans||[],open,Math.min(w.end,limited));let observed=0;
+        for(const [a,b]of spans){const last=coverage.at(-1);if(last&&a<=last[1])last[1]=Math.max(last[1],b);else coverage.push([a,b]);observed+=Math.max(0,b-Math.max(a,covered));covered=Math.max(covered,b);}
+        const amount=Object.fromEntries(KEYS.map(k=>[k,w.flowEligible===false?0:Number(w[k])||0]));parts.push({observed,amount});cum.obs+=observed;win.obs+=observed;
+        for(const k of KEYS){cum[k]+=amount[k];win[k]+=amount[k];}
+        while(j<i&&win.obs-parts[j].observed>=ROLL_MS){win.obs-=parts[j].observed;for(const k of KEYS)win[k]-=parts[j].amount[k];j++;}
+        const rate={},avg={},dev={};for(const k of KEYS){rate[k]=win[k]/Math.max(win.obs,1000)*ROLL_MS;avg[k]=cum[k]/Math.max(cum.obs,1000)*ROLL_MS;dev[k]=j===0?0:rate[k]-avg[k];}
+        if(w.flowEligible!==false){cum.bidNet+=Number(w.bidNet)||0;cum.askNet+=Number(w.askNet)||0;}
+        cum.activeBuy+=Number(w.activeBuy)||0;cum.activeSell+=Number(w.activeSell)||0;cum.activeWeak+=Number(w.activeWeak)||0;cum.activeForced+=Number(w.activeForced)||0;cum.volume+=Number(w.volume)||0;
+        const point={t:w.end,w,dev,rate,avg,net:{bid:cum.bidNet,ask:cum.askNet},cum:{activeBuy:cum.activeBuy,activeSell:cum.activeSell,activeWeak:cum.activeWeak,activeForced:cum.activeForced,volume:cum.volume}};
+        const plotAt=Math.max(anchors.at(-1).t,spans.length?Math.min(w.end,spans.at(-1)[1]):w.end);anchors.push({...point,t:plotAt});real.push(point);
+      });
+      for(const t of trades){const m=Math.min(239,Math.max(0,Math.floor(minuteOf(t.time))));bars[t.direction][m]+=t.volume;if(t.lowConfidence)bars[t.direction==='buy'?'weakBuy':'weakSell'][m]+=t.volume;if(t.forcedAssignment)bars.forced[m]+=t.volume;bars.has[m]=1;}
+      const pts=[anchors[0]];let coverageIndex=0;
+      for(let i=1;i<anchors.length;i++){
+        const a=anchors[i-1],b=anchors[i],blocks=[];while(coverageIndex<coverage.length&&coverage[coverageIndex][1]<=a.t)coverageIndex++;let duration=0;
+        for(let n=coverageIndex;n<coverage.length&&coverage[n][0]<b.t;n++){const from=Math.max(a.t,coverage[n][0]),to=Math.min(b.t,coverage[n][1]);if(to>from){blocks.push([from,to]);duration+=to-from;}}
+        const interpolate=(t,ratio)=>({t,hold:true,dev:Object.fromEntries(KEYS.map(k=>[k,a.dev[k]+(b.dev[k]-a.dev[k])*ratio])),net:{bid:a.net.bid+(b.net.bid-a.net.bid)*ratio,ask:a.net.ask+(b.net.ask-a.net.ask)*ratio}});
+        let cursor=a.t,elapsed=0;for(const [from,to]of blocks){if(from>cursor){const ratio=elapsed/duration;if(cursor>pts.at(-1).t)pts.push(interpolate(cursor,ratio));pts.push(interpolate(from,ratio));}elapsed+=to-from;cursor=to;}
+        if(cursor<b.t){const ratio=duration?elapsed/duration:0;if(cursor>pts.at(-1).t)pts.push(interpolate(cursor,ratio));pts.push(interpolate(b.t,ratio));}pts.push(b);
+      }
+      const last=pts.at(-1);if(limited>last.t)pts.push({t:limited,dev:last.dev,net:last.net,hold:true});
+      return {modern:true,pts,real,bars,t0,open,close,horizon:limited,coverage,bookCoverage,tradeCoverage,scopeCoverage,hasScope,bookPoints,exactTrades:trades,rows};
+    }
     function build(data) {
       const open = Date.parse(`${data?.day}T09:30:00+08:00`), close = Date.parse(`${data?.day}T15:00:00+08:00`);
+      if(data?.version>=13)return buildModern(data,open,close);
       // A cached trade can first arrive on the next day. It must not fold back
       // to 09:30 in this day's chart or prevent the rightward closing hold.
       const rows = (data?.windows || []).filter(w => Number.isFinite(w.end) && w.end >= open && w.end <= close).sort((a, b) => a.end - b.end);
@@ -282,6 +330,21 @@
       pts.forEach((p, i) => { const v = value(p); if (!Number.isFinite(v)) return; const x = xOf(p.t), b = Math.round(x * 2); if (b !== bucket || p.hold) { flush(); bucket = b; } group.push({ x, y: center - v / range * Q, i }); if (p.hold) flush(); });
       flush(); return d;
     }
+    function modernShades(kind) {
+      if(!model.modern)return [];
+      const nodes=[],right=model.close;
+      const rect=(a,b,cls,fill,opacity)=>{const width=xOf(b)-xOf(a);if(width>0)nodes.push(svgEl('rect',{class:cls,x:xOf(a).toFixed(2),y:0,width:width.toFixed(2),height:H,fill,opacity}));};
+      if(model.horizon===null){rect(model.open,right,'book-wave-future','#eef1f5',0.6);return nodes;}
+      if(model.t0>model.open)rect(model.open,model.t0,'book-wave-before','#eef1f5',0.6);
+      const ranges=kind==='active'?model.tradeCoverage:model.coverage;let cursor=model.t0;
+      for(const [a,b]of [...ranges,[model.horizon,model.horizon]]){if(a>cursor)rect(cursor,Math.min(a,model.horizon),'book-wave-gap','#dce1e8',0.38);cursor=Math.max(cursor,b);}
+      if(model.horizon<right)rect(model.horizon,right,'book-wave-future','#eef1f5',0.65);
+      return nodes;
+    }
+    function progressNodes() {
+      if(!model.modern||model.horizon===null)return [];
+      const x=xOf(model.horizon).toFixed(2);return [svgEl('line',{class:'book-wave-progress',x1:x,x2:x,y1:0,y2:H,stroke:'#607d9b','stroke-width':1,'stroke-dasharray':'2 3','data-through':model.horizon})];
+    }
     function drawLines(panel, bidValue, askValue) {
       let max = 0;
       for (const p of model.pts) max = Math.max(max, Math.abs(bidValue(p)), Math.abs(askValue(p)));
@@ -297,7 +360,7 @@
         if (a > cursor) {const x=xOf(cursor), width=xOf(a)-x;if(width>0)shades.push(svgEl('rect',{class:'book-wave-gap',x:x.toFixed(2),y:0,width:width.toFixed(2),height:H,fill:'#dce1e8',opacity:0.38,'data-gap':'unobserved'}));}
         cursor=Math.max(cursor,b);
       }
-      panel.layer.replaceChildren(...shades,...nodes);
+      panel.layer.replaceChildren(...(model.modern?modernShades(panel.kind):shades),...nodes,...progressNodes());
     }
     function drawBars(panel) {
       const nodes = [], b = model.bars;
@@ -309,22 +372,36 @@
           if (!b.has[m]) continue;
           for (const [v, color, kind] of [[b.buy[m], RED, 'buy'], [b.sell[m], GREEN, 'sell'], [b.unknown[m], '#8a919d', 'unknown']].filter(x => x[0] > 0).sort((x, y) => y[0] - x[0])) {
             const h = v / top * (MID - 2);
-            const binary=Number(latest?.version)>=12,offset={buy:0,sell:1,unknown:2}[kind],slot=binary?bw/2:bw/3;
-            nodes.push(svgEl('rect', { x: (m * bw + offset * slot + 0.03).toFixed(2), y: (MID - h).toFixed(2), width: (slot * 0.84).toFixed(2), height: h.toFixed(2), fill: color, 'data-kind': kind, 'data-minute': m }));
-            const weak=kind==='buy'?b.weakBuy[m]:kind==='sell'?b.weakSell[m]:0;if(binary&&weak>0)nodes.push(svgEl('rect',{x:(m*bw+offset*slot+0.03).toFixed(2),y:(MID-h).toFixed(2),width:(slot*0.84).toFixed(2),height:(Math.min(v,weak)/top*(MID-2)).toFixed(2),fill:'#fff',opacity:0.5,'data-weak-direction':kind,'data-minute':m}));
+            const binary=Number(latest?.version)>=12,offset={buy:0,sell:1,unknown:2}[kind],slot=binary?bw/2:bw/3,remaining=model.modern?Math.max(0,Math.min(bw,xOf(model.horizon)-m*bw)):bw,actualSlot=model.modern?remaining/(binary?2:3):slot;
+            const weak=kind==='buy'?b.weakBuy[m]:kind==='sell'?b.weakSell[m]:0;
+            if(actualSlot<=0){
+              // A trade exactly at the new minute must remain visible without painting future time.
+              const x=xOf(model.horizon).toFixed(2);nodes.push(svgEl('line',{x1:x,x2:x,y1:(MID-h).toFixed(2),y2:MID,stroke:color,'stroke-width':0.65,'data-kind':kind,'data-minute':m,'data-minute-edge':'start'}));
+              if(binary&&weak>0)nodes.push(svgEl('line',{x1:x,x2:x,y1:(MID-h).toFixed(2),y2:(MID-h+Math.min(v,weak)/top*(MID-2)).toFixed(2),stroke:'#fff',opacity:0.5,'stroke-width':0.65,'data-weak-direction':kind,'data-minute':m}));
+              continue;
+            }
+            const padding=model.modern?Math.min(0.03,actualSlot*0.06):0.03;
+            nodes.push(svgEl('rect', { x: (m * bw + offset * actualSlot + padding).toFixed(2), y: (MID - h).toFixed(2), width: (actualSlot * 0.84).toFixed(2), height: h.toFixed(2), fill: color, 'data-kind': kind, 'data-minute': m }));
+            if(binary&&weak>0)nodes.push(svgEl('rect',{x:(m*bw+offset*actualSlot+padding).toFixed(2),y:(MID-h).toFixed(2),width:(actualSlot*0.84).toFixed(2),height:(Math.min(v,weak)/top*(MID-2)).toFixed(2),fill:'#fff',opacity:0.5,'data-weak-direction':kind,'data-minute':m}));
           }
         }
       }
-      panel.layer.replaceChildren(...nodes);
+      const markers=[];
+      if(model.modern){
+        for(const [a,b]of model.tradeCoverage){const width=xOf(b)-xOf(a);if(width>0)markers.push(svgEl('rect',{class:'book-wave-trade-observed',x:xOf(a).toFixed(2),y:MID-1,width:width.toFixed(2),height:2,fill:'#8398ae'}));}
+        for(const t of model.bookPoints)if(!inRanges(model.tradeCoverage,t))markers.push(svgEl('line',{class:'book-wave-trade-pending',x1:xOf(t).toFixed(2),x2:xOf(t).toFixed(2),y1:MID-3,y2:MID+3,stroke:'#cb9b47','data-book-at':t}));
+      }
+      panel.layer.replaceChildren(...modernShades(panel.kind),...markers,...nodes,...progressNodes());
     }
     function setStatus(data) {
       if (!data?.code) { status.textContent = '查询后从开始观测的时刻画起；横轴为北京时间，与上方分时图对齐。'; return; }
+      if(model.modern){status.textContent=model.horizon===null?`${data.day}：本机暂无该日记录。`:`${data.day}｜四图数据推进至 ${clock(model.horizon)}（北京）｜盘口 ${Number.isFinite(data.book_until)?clock(data.book_until):'待资料'} · 成交资料 ${Number.isFinite(data.trade_until)?clock(data.trade_until):'待资料'}${data.selected_at?'｜选点截止 '+data.selected_at:''}｜${data.live?'随记录更新':'本机记录'}；浅色右区尚未到达，盘口/成交/净委托可用范围分别提示。`;return;}
       const n = model.real.length;
       if (!n) {
         status.textContent = data.day === data.today ? `${data.day}：暂无已结算的观测记录。交易时段保持页面打开即从开始观测的时刻画起；也可在上方切换到本机有记录的交易日查看。` : `${data.day}：本机没有这一天的观测记录，无法画图，不用其他日期代替。`;
         return;
       }
-      status.textContent = `${data.day}｜${clock(model.t0)}（北京时间）开始观测｜${n.toLocaleString('zh-CN')} 个相邻/未覆盖区间｜灰区无队列覆盖/待资料；方向逐笔二元估计，弱依据单列${data.selected_at ? '｜四图与统计均截止 ' + data.selected_at : ''}｜${data.live ? '随记录实时更新' : '本机记录'}`;
+      status.textContent = `${data.day}｜${clock(model.t0)}（北京时间）开始观测｜${n.toLocaleString('zh-CN')} 个相邻/未覆盖区间｜灰区无队列覆盖/待资料；逐笔方向依据单列${data.selected_at ? '｜四图与统计均截止 ' + data.selected_at : ''}｜${data.live ? '随记录实时更新' : '本机记录'}`;
     }
     function draw() {
       drawQueued = false;
@@ -334,7 +411,7 @@
       drawLines(panels[2], p => p.net.bid, p => p.net.ask);
       drawBars(panels[3]);
       setStatus(latest);
-      section.dataset.points = String(model.real.length);
+      section.dataset.points = String(model.real.length);if(model.modern)section.dataset.observedUntil=model.horizon===null?'':String(model.horizon);
       if (lastHover && !tip.hidden) show(lastHover.index, lastHover.frac, lastHover.fingerX); else hide();
     }
     function schedule(data) { latest = data; if (!drawQueued) { drawQueued = true; requestAnimationFrame(draw); } }
@@ -347,7 +424,37 @@
       return real[lo];
     }
     function hide() { tip.hidden = true; for (const p of panels) p.cross.setAttribute('display', 'none'); }
+    function showModern(index,frac,fingerX) {
+      lastHover={index,frac,fingerX};const mAt=frac*240,target=model.open+mAt*60000+(mAt>=120?90*60000:0),x=(frac*W).toFixed(2);
+      for(const panel of panels){panel.cross.setAttribute('x1',x);panel.cross.setAttribute('x2',x);panel.cross.removeAttribute('display');}
+      const lines=[`${clock(target)}（北京时间）· 指针时刻`],future=model.horizon===null||target>model.horizon+1,before=model.t0!==null&&target<model.t0;
+      if(model.horizon===null)lines.push('本日暂无盘口或成交记录。');
+      else if(before)lines.push(`尚未开始观测；起点 ${clock(model.t0)}。`);
+      else if(future)lines.push(`尚未到达该时刻；四图数据推进至 ${clock(model.horizon)}。不将未来平线冒充已观测。`);
+      else if(model.hasScope&&!inRanges(model.scopeCoverage,target))lines.push('此处未在实际观察时段内（暂停/未采集空档）；不计入共同成交、买卖量或净委托，平线只保持累计位置。');
+      else{
+        const bookHere=inRanges(model.bookCoverage,target)||model.bookPoints.some(t=>Math.abs(t-target)<=1),tradeHere=inRanges(model.tradeCoverage,target);
+        let bpos=0;while(bpos<model.bookPoints.length&&model.bookPoints[bpos]<=target+1)bpos++;const lastBook=model.bookPoints[bpos-1];
+        lines.push(bookHere?'盘口：已观测。':Number.isFinite(lastBook)?`盘口：当前无连续快照，最近 ${clock(lastBook)}。`:'盘口：该时刻尚无快照。');
+        const m=Math.min(239,Math.max(0,Math.floor(minuteOf(target)))),minuteStart=model.open+m*60000+(m>=120?90*60000:0);
+        const seen=model.exactTrades.filter(t=>t.time<=target+1),minute=seen.filter(t=>t.time>=minuteStart),buy=minute.filter(t=>t.direction==='buy').reduce((v,t)=>v+t.volume,0),sell=minute.filter(t=>t.direction==='sell').reduce((v,t)=>v+t.volume,0),weak=minute.filter(t=>t.lowConfidence).reduce((v,t)=>v+t.volume,0),forced=minute.filter(t=>t.forcedAssignment).reduce((v,t)=>v+t.volume,0);
+        if(tradeHere||minute.length){lines.push(`${minuteLabel(m)} 已收成交（截至指针）：主动买入 ${lots(buy)} · 主动卖出 ${lots(sell)} · 共同成交 ${lots(buy+sell)} 手。`);if(!minute.length)lines.push('该分钟截至指针已收成交为0，不代表源数据已确认完整。');else lines.push(`低依据 ${lots(weak)} 手，初始化 ${lots(forced)} 手（已含买卖量）；最后成交 ${clock(minute.at(-1).time)}。`);if(!tradeHere)lines.push('有成交明细，但响应范围未覆盖该指针时刻。');}
+        else lines.push(bookHere?'成交：盘口已更新，成交资料待同步；不是“没有观测”。':'成交：该时刻没有可用明细或响应范围，不能把缺资料当0。');
+        const pair=model.rows.filter(w=>(w.samplePairs||w.bookSpans?.length)&&target>=w.start&&target<=w.end).at(-1);
+        if(pair?.flowEligible){lines.push(`相邻区间 ${clock(pair.start)} → ${clock(pair.end)}（以下为区间值，不是该秒新增量）`);lines.push(`买盘：净补单 ${lots(pair.bidAdded)} · 净撤回 ${lots(pair.bidCancelled)} · 净委托 ${signed(pair.bidNet)}。`);lines.push(`卖盘：净补单 ${lots(pair.askAdded)} · 净撤回 ${lots(pair.askCancelled)} · 净委托 ${signed(pair.askNet)}。`);lines.push(`可计算 ${pair.eligibleLevels??'—'}/${pair.totalLevels??'—'} 个侧/价项；共同成交 ${lots(pair.volume)} 手。`);}
+        else if(bookHere)lines.push('净委托：盘口已观测，等待下一帧或成交补偿资料；缺值用—，不冒充0。');
+        else lines.push('净委托：此处没有可比较区间，平线仅保持累计显示位置。');
+        const completed=model.real.filter(p=>p.w.flowEligible&&p.t<=target+1).at(-1),cbuy=seen.filter(t=>t.direction==='buy').reduce((v,t)=>v+t.volume,0),csell=seen.filter(t=>t.direction==='sell').reduce((v,t)=>v+t.volume,0);
+        if(tradeHere||seen.length)lines.push(`截至指针已收：主动买入 ${lots(cbuy)} · 主动卖出 ${lots(csell)} · 共同成交 ${lots(cbuy+csell)} 手。`);
+        else lines.push('累计成交：资料待同步，不能把尚未收到当作0。');
+        if(completed)lines.push(`净委托累计截至已完成区间 ${clock(completed.t)}：买盘 ${signed(completed.net.bid)} · 卖盘 ${signed(completed.net.ask)}。`);
+        else lines.push('净委托累计：—，尚无已完成补偿的区间。');
+      }
+      tip.replaceChildren(...lines.map(text=>make('div','',text)));tip.hidden=false;
+      const cell=panels[index<2?2:0].cell,gridWidth=grid.clientWidth,tipWidth=tip.offsetWidth;tip.style.top=(cell.offsetTop+4)+'px';tip.style.left=Math.max(0,fingerX<gridWidth/2?Math.min(gridWidth-tipWidth,fingerX+18):fingerX-tipWidth-18)+'px';
+    }
     function show(index, frac, fingerX) {
+      if(model.modern)return showModern(index,frac,fingerX);
       const p = nearest(frac * W);
       lastHover = { index, frac, fingerX };
       const mAtFinger = frac * 240;
@@ -363,16 +470,16 @@
         !p ? '本日暂无已结算观测记录。' : target < model.t0 ? `尚未开始观测；起点 ${clock(model.t0)}。` : target > model.real[model.real.length - 1].t ? `最后已结算记录 ${clock(model.real[model.real.length - 1].t)}；之后尚无观测结果。` : '观测中断；此时没有可比较的盘口记录。',
         '水平线仅保持显示位置，不表示成交或挂单变化为0。',
         '不使用附近记录冒充该时刻的成交、加单或撤单。',
-        ...(index === 3 && model.bars ? (() => { const m=Math.min(239,Math.max(0,Math.floor(minuteOf(target)))),b=model.bars;return b.has[m]?[`${minuteLabel(m)} 已收实际成交分钟：估计买入 ${lots(b.buy[m])} · 估计卖出 ${lots(b.sell[m])} · 低依据 ${lots(b.weakBuy[m]+b.weakSell[m])} 手，初始化 ${lots(b.forced[m])} 手（已含买卖量；队列覆盖不足）`]:[]; })() : [])
+        ...(index === 3 && model.bars ? (() => { const m=Math.min(239,Math.max(0,Math.floor(minuteOf(target)))),b=model.bars;return b.has[m]?[`${minuteLabel(m)} 已收实际成交分钟：主动买入 ${lots(b.buy[m])} · 主动卖出 ${lots(b.sell[m])} · 低依据 ${lots(b.weakBuy[m]+b.weakSell[m])} 手，初始化 ${lots(b.forced[m])} 手（已含买卖量；队列覆盖不足）`]:[]; })() : [])
       ] : [
         `${clock(p.t)}（北京时间）· 本次成交 ${lots(w.volume)} 手`,
-        `估计买入 ${lots(w.activeBuy)} 手 · 估计卖出 ${lots(w.activeSell)} 手 · 低依据 ${lots(w.activeWeak)} 手，初始化 ${lots(w.activeForced)} 手（已含买卖量）`,
-        `买盘估算：净补单 ${lots(w.bidAdded)} · 净撤回 ${lots(w.bidCancelled)} · 净委托 ${signed(w.bidNet)}`,
-        `卖盘估算：净补单 ${lots(w.askAdded)} · 净撤回 ${lots(w.askCancelled)} · 净委托 ${signed(w.askNet)}`,
+        `主动买入 ${lots(w.activeBuy)} 手 · 主动卖出 ${lots(w.activeSell)} 手 · 低依据 ${lots(w.activeWeak)} 手，初始化 ${lots(w.activeForced)} 手（已含买卖量）`,
+        `买盘：净补单 ${lots(w.bidAdded)} · 净撤回 ${lots(w.bidCancelled)} · 净委托 ${signed(w.bidNet)}`,
+        `卖盘：净补单 ${lots(w.askAdded)} · 净撤回 ${lots(w.askCancelled)} · 净委托 ${signed(w.askNet)}`,
         `近1分钟/平均（手/分钟）：买加 ${lots(p.rate.bidAdded)}/${lots(p.avg.bidAdded)} · 买撤 ${lots(p.rate.bidCancelled)}/${lots(p.avg.bidCancelled)}`,
         `卖加 ${lots(p.rate.askAdded)}/${lots(p.avg.askAdded)} · 卖撤 ${lots(p.rate.askCancelled)}/${lots(p.avg.askCancelled)}`,
-        `${minuteLabel(m)} 实际成交分钟：估计买入 ${lots(b.buy[m])} · 估计卖出 ${lots(b.sell[m])} · 低依据 ${lots(b.weakBuy[m]+b.weakSell[m])}，初始化 ${lots(b.forced[m])}`,
-        `累计估算：买盘净委托 ${signed(p.net.bid)} · 卖盘净委托 ${signed(p.net.ask)} · 估计买入 ${lots(p.cum.activeBuy)} · 估计卖出 ${lots(p.cum.activeSell)} · 低依据 ${lots(p.cum.activeWeak)}，初始化 ${lots(p.cum.activeForced)}`
+        `${minuteLabel(m)} 实际成交分钟：主动买入 ${lots(b.buy[m])} · 主动卖出 ${lots(b.sell[m])} · 低依据 ${lots(b.weakBuy[m]+b.weakSell[m])}，初始化 ${lots(b.forced[m])}`,
+        `累计：买盘净委托 ${signed(p.net.bid)} · 卖盘净委托 ${signed(p.net.ask)} · 主动买入 ${lots(p.cum.activeBuy)} · 主动卖出 ${lots(p.cum.activeSell)} · 低依据 ${lots(p.cum.activeWeak)}，初始化 ${lots(p.cum.activeForced)}`
       ];
       tip.replaceChildren(...lines.map(text => make('div', '', text)));
       tip.hidden = false;
@@ -418,13 +525,13 @@
 
     const metricsGrid = make('div', 'book-side-grid');
     const fields = [
-      ['added', '累计净补单估算（手）', /(?:累计)?加单\s+(.+?)\s*手/],
-      ['cancelled', '累计净撤回估算（手）', /(?:累计)?撤单\s+(.+?)\s*手/],
-      ['net', '估算净委托（手）', /净加单\s+(.+?)\s*手/],
-      ['netRate', '净委托率（估算）', /净加单率\s+(.+?)(?:；|。|$)/],
+      ['added', '累计净补单（手）', /(?:累计)?加单\s+(.+?)\s*手/],
+      ['cancelled', '累计净撤回（手）', /(?:累计)?撤单\s+(.+?)\s*手/],
+      ['net', '净委托（手）', /净加单\s+(.+?)\s*手/],
+      ['netRate', '净委托率', /净加单率\s+(.+?)(?:；|。|$)/],
       ['reduced', '合计减少（手）', /(?:观察|合计)减少\s+(.+?)\s*手/],
       ['tradeCredit', '成交抵扣（手）', /(?:成交解释|成交抵扣)\s+(.+?)\s*手/],
-      ['volume', '共同成交分母（全部已收，手）', /共同成交分母\s+(.+?)\s*手/]
+      ['volume', '共同成交分母（观察时段内，手）', /共同成交分母\s+(.+?)\s*手/]
     ];
     for (const [suffix, label] of [['Bid', '买盘'], ['Ask', '卖盘']]) {
       const card = make('section', 'book-side-card');
@@ -454,7 +561,7 @@
       const activeRow = make('div');
       activeRow.dataset.field = suffix === 'Bid' ? 'activeBuy' : 'activeSell';
       const activeValue = make('dd', '', '—');
-      activeRow.append(make('dt', '', suffix === 'Bid' ? '估计主动买入（手）' : '估计主动卖出（手）'), activeValue);
+      activeRow.append(make('dt', '', suffix === 'Bid' ? '主动买入（手）' : '主动卖出（手）'), activeValue);
       const refreshActive = () => {
         const text = activeSource?.textContent || '';
         const match = text.match(/：\s*(.+)$/);
@@ -485,7 +592,7 @@
     const at = byId('bookFlowAt'), volume = byId('bookFlowVolume');
     const instant = byId('bookFlowInstant'), coverage = byId('bookFlowCoverage'), unknown = byId('bookFlowUnknown');
     flow.removeAttribute('style'); flow.className = 'book-comparison';
-    flow.replaceChildren(make('h2', 'book-comparison-title', '相邻五档净委托估算 · v12'), at, volume, metricsGrid, unknown, instant, coverage, buildBookWaves());
+    flow.replaceChildren(make('h2', 'book-comparison-title', '相邻五档净委托 · v13'), at, volume, metricsGrid, unknown, instant, coverage, buildBookWaves());
 
     const records = make('section', 'card');
     records.id = 'bookRecordsPanel';
@@ -496,9 +603,9 @@
     const originalBody = byId('bookThreeRows');
     const originalWrap = originalBody.closest('.table-wrap');
     const sourceDetails = make('details', 'book-record-source');
-    sourceDetails.append(make('summary', '', '逐价估算、二元方向与弱依据（扩展）'), originalWrap);
+    sourceDetails.append(make('summary', '', '逐价计算、方向依据（扩展）'), originalWrap);
     const tableViews = make('div', 'book-side-grid'); tableViews.id = 'bookTradeDetailGrid';
-    const headers = ['相邻快照/未覆盖成交区间（北京）', '资料更新时间（北京）', '本区间已收成交（手）', '可见增加（手）', '可见减少（手）', '成交补偿（手）', '净补单估算（手）', '净撤回估算（手）', '净委托估算（手）', '净补率（估算）', '净撤率（估算）', '净委托率（估算）'];
+    const headers = ['相邻快照/未覆盖成交区间（北京）', '资料更新时间（北京）', '本区间已收成交（手）', '可见增加（手）', '可见减少（手）', '成交补偿（手）', '净补单（手）', '净撤回（手）', '净委托（手）', '净补率', '净撤率', '净委托率'];
     const views = [];
     for (const [side, label] of [['bid', '买盘'], ['ask', '卖盘']]) {
       const section = make('section', 'book-side-card'); section.dataset.side = side;

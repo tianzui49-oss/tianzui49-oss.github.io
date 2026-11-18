@@ -11,12 +11,12 @@ function interval(start, end, net = 100) {
   return { start: at(start), end: at(end), spans: [[at(start), at(end)]], volume: 100,
     activeBuy: 60, activeSell: 40, bidAdded: net, askAdded: net, bidCancelled: 0, askCancelled: 0, bidNet: net, askNet: net };
 }
-function load(windows,version) {
+function load(windows,version,extra={}) {
   const dom = new JSDOM('<!doctype html><body></body>', { runScripts: 'outside-only' });
   const w = dom.window, d = w.document;
   w.requestAnimationFrame = cb => { cb(); return 1; };
   w.__bookWaveData = { code: '600513', day: '2026-11-13', today: '2026-11-14', live: false,
-    started_at: '2026-11-13T10:30:00+08:00', version, windows };
+    started_at: '2026-11-13T10:30:00+08:00', version, windows, ...extra };
   w.eval(`const make=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n;};\n${code}\ndocument.body.append(buildBookWaves());`);
   const svgs = [...d.querySelectorAll('svg')];
   for (const svg of svgs) svg.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 240 });
@@ -161,6 +161,16 @@ test('v12缺队列覆盖仍展示已收二元成交分钟柱',()=>{
  row.trades=[{time:at('10:30:01'),direction:'sell',volume:100,lowConfidence:true,forcedAssignment:true}];
  const h=load([row],12);assert.equal(h.d.querySelectorAll('rect[data-kind="sell"]').length,1);assert.equal(h.d.querySelectorAll('rect[data-kind="unknown"]').length,0);
  const text=h.slide('10:30:03',3).text;assert.match(text,/低依据/);assert.match(text,/初始化/);assert.match(text,/此时未观测/);h.dom.window.close();
+});
+test('v13前三图仅推进至已收时间，不提前延伸到15:00；四图进度同位置',()=>{
+ const row=interval('10:30:00','10:30:03');row.flowEligible=true;row.samplePairs=1;row.bookSpans=row.spans;row.trades=[{time:at('10:30:01'),direction:'buy',volume:100}];
+ const horizon=at('10:30:05'),h=load([row],13,{observed_until:horizon,book_points:[{at:at('10:30:00')},{at:at('10:30:03')}],book_spans:row.spans,trade_ranges:[[at('10:30:00'),horizon]]});
+ const endpoint=+(100+5/60/240*400).toFixed(2);for(const kind of ['added','cancelled','net'])for(const side of ['bid','ask'])assert.equal(h.pts(kind,side).at(-1)[0],endpoint);
+ const progress=[...h.d.querySelectorAll('.book-wave-progress')];assert.equal(progress.length,4);assert.ok(progress.every(p=>p.dataset.through===String(horizon)));assert.match(h.slide('10:30:04',3).text,/已收成交/);assert.match(h.slide('10:30:06',3).text,/尚未到达该时刻/);h.dom.window.close();
+});
+test('v13分钟边界成交不会因0宽被丢失，也不画到未来分钟',()=>{
+ const t=at('10:31:00'),h=load([],13,{observed_until:t,trades:[{time:t,direction:'buy',volume:100}],trade_ranges:[[at('10:30:00'),t]],book_points:[],book_spans:[]});
+ const bars=[...h.d.querySelectorAll('[data-kind="active"] [data-kind="buy"]')];assert.equal(bars.length,1);assert.equal(bars[0].dataset.minute,'61');assert.equal(bars[0].dataset.minuteEdge,'start');assert.equal(+bars[0].getAttribute('x1'),+(61/240*400).toFixed(2));assert.match(h.slide('10:31:00',3).text,/09|10:31 已收成交/);h.dom.window.close();
 });
 test('14:10停止后次日凌晨收到缓存成交：不能把尾线折回09:30，须向右到15:00', () => {
   const a = interval('13:57:20', '14:09:55', 300);

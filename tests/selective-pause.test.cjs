@@ -13,6 +13,7 @@ w.eval(main+'\nwindow.api={state,bookRecorder,watchlist};');
 const {state,bookRecorder:r,watchlist}=w.api,H=r.__test,$=id=>w.document.getElementById(id),wait=()=>new Promise(resolve=>setTimeout(resolve,45));
 const input=code=>$('collectionSelectionItems').querySelector(`input[value="${code}"]`),click=id=>$(id).click();
 async function raw(){const d=await H.db();return Promise.all(['events','ticks','latest'].map(store=>new Promise((resolve,reject)=>{const q=d.transaction(store).objectStore(store).getAll();q.onsuccess=()=>resolve(q.result);q.onerror=()=>reject(q.error);})));}
+async function assertPreservedBefore(prior){const before=JSON.parse(prior),after=await raw();assert.deepEqual(after[0].slice(0,before[0].length),before[0]);assert.deepEqual(after[1],before[1]);assert.deepEqual(after[2],before[2]);assert.ok(after[0].slice(before[0].length).every(e=>e.scope_only===true&&['stats_pause','observation_heartbeat'].includes(e.kind)));return after;}
 (async()=>{try{
  await wait();state.code='300750';state.name='宁德时代';await r.begin(state.code);await wait();
  assert.equal(H.collectors.size,3);assert.equal(new Set(r.collectionCodes()).size,3);
@@ -21,10 +22,10 @@ async function raw(){const d=await H.db();return Promise.all(['events','ticks','
  click('collectionSelectNone');assert.equal($('collectionPauseSelected').disabled,true);assert.equal($('collectionResumeSelected').disabled,true);
  input('600000').checked=true;input('600000').dispatchEvent(new w.Event('change'));
  const prior=JSON.stringify(await raw()),otherJob=H.collectors.get('600127');click('collectionPauseSelected');await wait();
- assert.equal(JSON.stringify(await raw()),prior);assert.equal(r.isCodePaused('600000'),true);assert.equal(r.isCodePaused('600127'),false);assert.equal(H.collectors.has('600000'),false);assert.equal(H.collectors.get('600127'),otherJob);assert.match($('watchlistStatus').textContent,/已暂停 1 只/);
+ await assertPreservedBefore(prior);assert.equal(r.isCodePaused('600000'),true);assert.equal(r.isCodePaused('600127'),false);assert.equal(H.collectors.has('600000'),false);assert.equal(H.collectors.get('600127'),otherJob);assert.match($('watchlistStatus').textContent,/已暂停 1 只/);
  const sent=requests.filter(x=>x.url.includes('code=600000'));assert(sent.length>=2);assert(sent.every(x=>x.options.signal.aborted));
- r.capture('depth',{code:'600000',rows:[]});r.capture('ticks',{code:'600000',rows:[]});r.syncWatchlist();r.heartbeat();await wait();assert.equal(JSON.stringify(await raw()),prior);assert(!H.collectors.has('600000'));
- console.log('PASS 单选只停止目标，取消在途请求，阻止后续保存，未选调度对象和全部已有数据不变');
+ r.capture('depth',{code:'600000',rows:[]});r.capture('ticks',{code:'600000',rows:[]});r.syncWatchlist();r.heartbeat();await wait();await assertPreservedBefore(prior);assert(!H.collectors.has('600000'));
+ console.log('PASS 单选只停止目标，取消在途请求，阻止后续保存，未选调度对象和全部已有数据不变，仅追加观察停止边界');
  const oldSession=H.sessions.get('600000').id,oldSegment=H.segments.get('600000');
  state.code='600000';await r.begin('600000');assert(!H.collectors.has('600000'));assert(r.isCodePaused('600000'));
  state.code='300750';await r.begin('300750');click('watchlistPause');click('collectionSelectNone');input('600000').checked=true;input('600000').dispatchEvent(new w.Event('change'));click('collectionResumeSelected');await wait();
@@ -34,7 +35,7 @@ async function raw(){const d=await H.db();return Promise.all(['events','ticks','
  click('watchlistPause');click('collectionSelectionCancel');assert.equal(H.collectors.size,0);assert.equal($('collectionSelection').hidden,true);
  r.setPaused(true);r.setCodesPaused(['600127'],false);await wait();assert.deepEqual([...H.collectors.keys()],['600127']);assert(r.isCodePaused('600000'));assert(r.isCodePaused('300750'));
  r.setPaused(false);await wait();assert.equal(H.collectors.size,3);
- const racePrior=JSON.stringify(await raw());let release;H.blockQueue(new Promise(resolve=>release=resolve));r.capture('depth',{code:'600000',rows:[{side:'bid',price:10,volume:100}]});r.setCodesPaused(['600000'],true);release();await wait();assert.equal(JSON.stringify(await raw()),racePrior);r.setCodesPaused(['600000'],false);await wait();
+ const racePrior=JSON.stringify(await raw());let release;H.blockQueue(new Promise(resolve=>release=resolve));r.capture('depth',{code:'600000',rows:[{side:'bid',price:10,volume:100}]});r.setCodesPaused(['600000'],true);release();await wait();await assertPreservedBefore(racePrior);r.setCodesPaused(['600000'],false);await wait();
  console.log('PASS 暂停前已排队但未开始的保存被丢弃，不会在暂停后补写');
  console.log('PASS 一键全选、取消、全局停止后选择恢复仅恢复所选，全局恢复兼容原接口');
  const before=await raw(),depth={code:'600127',source:'THSDK',rows:[{side:'bid',price:10,volume:100}]};r.capture('depth',depth);await wait();const after=await raw();assert.equal(after[0].length,before[0].length+1);assert.deepEqual(after[0].slice(0,before[0].length),before[0]);
