@@ -6,18 +6,18 @@ function audit(e,t,s=session,cutoff=Infinity){const r=Calc.calculate(e,t,s,cutof
 
 test('用户7笔混合路径：五档和逐笔一致印证，不一致采用逐笔而非旧盘口全归买',()=>{
  const prices=[8.70,8.80,8.90,8.70,8.70,8.80,8.80],e=[depth(0,{bid:8.69,ask:8.70}),depth(1,{bid:8.69,ask:8.70}),response(2)],t=prices.map((price,i)=>tick((i+1)/10,100,{id:'user-'+i,price,recv:2})),r=audit(e,t);
- assert.equal(r.version,13);assert.deepEqual(plain(r.trade_decisions.map(d=>d.active_direction)),['buy','buy','buy','sell','sell','buy','buy']);
+ assert.equal(r.version,14);assert.deepEqual(plain(r.trade_decisions.map(d=>d.active_direction)),['buy','buy','buy','sell','sell','buy','buy']);
  assert.equal(r.active_buy_shares,500);assert.equal(r.active_sell_shares,200);assert.equal(r.trade_decisions[3].quote_direction,'buy');assert.equal(r.trade_decisions[3].tick_direction,'sell');assert.equal(r.trade_decisions[3].fusion_status,'conflict_tick_selected');assert.equal(r.trade_decisions[4].tick_reason,'zero_tick_inherit');
 });
-test('新盘口与下跌不一致也按用户最终口径用成交，记录quote更新而不假称一致',()=>{
+test('及时新卖一下降可纠正跌价：仍为买入，并保留双方依据',()=>{
  const e=[depth(0,{bid:10,ask:10.10}),depth(.4,{bid:10,ask:10.04}),depth(1,{bid:10,ask:10.04}),response(2)],t=[tick(.2,100,{price:10.10,recv:2,id:'a'}),tick(.5,100,{price:10.04,recv:2,id:'b'})],r=audit(e,t),d=r.trade_decisions[1];
- assert.equal(d.active_direction,'sell');assert.equal(d.quote_direction,'buy');assert.equal(d.tick_direction,'sell');assert.equal(d.quote_updated_since_previous,true);assert.equal(d.fusion_status,'conflict_tick_selected');assert.equal(d.confidence,'low');
+ assert.equal(d.active_direction,'buy');assert.equal(d.quote_direction,'buy');assert.equal(d.tick_direction,'sell');assert.equal(d.quote_updated_since_previous,true);assert.equal(d.fusion_status,'timely_best_quote_overrides_tick');assert.equal(d.confidence,'medium');
 });
 test('盘口与逐笔都判卖时共同印证；未来同秒盘口不能参与判定',()=>{
  const e=[depth(0),depth(.5,{bid:10.20,ask:10.21}),depth(1),response(2)],t=[tick(.2,100,{price:10.01,recv:2}),tick(.4,100,{price:10,recv:2})],r=audit(e,t);assert.equal(r.trade_decisions[1].fusion_status,'agreement');assert.equal(r.trade_decisions[1].quote_at,iso(0));assert.equal(r.trade_decisions[1].active_direction,'sell');
 });
-test('相同价位从买侧换卖侧：保留逐笔继承和盘口冲突，不误改成静态报价方向',()=>{
- const e=[depth(0),depth(.4,{bid:9.99,ask:10}),depth(1,{bid:9.99,ask:10}),response(2)],t=[tick(.2,100,{recv:2}),tick(.5,100,{recv:2})],r=audit(e,t);assert.equal(r.trade_decisions[1].active_direction,'sell');assert.equal(r.trade_decisions[1].quote_direction,'buy');assert.equal(r.trade_decisions[1].tick_reason,'zero_tick_inherit');assert.equal(r.trade_decisions[1].fusion_status,'conflict_tick_selected');
+test('同价从买侧换新卖一：及时新最优价打断卖方向继承',()=>{
+ const e=[depth(0),depth(.4,{bid:9.99,ask:10}),depth(1,{bid:9.99,ask:10}),response(2)],t=[tick(.2,100,{recv:2}),tick(.5,100,{recv:2})],r=audit(e,t);assert.equal(r.trade_decisions[1].active_direction,'buy');assert.equal(r.trade_decisions[1].quote_direction,'buy');assert.equal(r.trade_decisions[1].tick_reason,'zero_tick_inherit');assert.equal(r.trade_decisions[1].fusion_status,'timely_best_quote_overrides_tick');assert.equal(r.trade_decisions[1].reason,'same_price_new_best_quote_switch');
 });
 test('方向融合结果必须同步补偿到同侧同价，不能只改显示买卖数字',()=>{
  const e=[depth(0),depth(1),response(2)],t=[tick(.2,300,{price:10.02,recv:2,id:'up'}),tick(.4,500,{price:10.01,recv:2,id:'down'})],r=audit(e,t),w=r.windows.find(w=>w.sample_pairs);
@@ -48,7 +48,7 @@ test('审计检出融合线索/冲突选择/连续性/最终侧量篡改',()=>{
 });
 function hover(h,second,index=3){const svg=h.w.document.querySelectorAll('.book-wave-cell svg')[index];svg.getBoundingClientRect=()=>({left:0,top:0,width:400,height:240});h.w.document.querySelector('.book-wave-grid').getBoundingClientRect=()=>({left:0,top:0});const e=new h.w.Event('pointermove');Object.assign(e,{pointerType:'mouse',clientX:second/14400*400});svg.dispatchEvent(e);return h.w.document.querySelector('.book-wave-tip').textContent;}
 test('盘口已推进但成交待资料：四图同进度，悬停不再错误显示此时未观测',async()=>{
- const h=await harness();try{await h.capture('depth',1);assert.equal(h.w.__bookWaveData.version,13);assert.equal(h.w.__bookWaveData.observed_until,base+1000);const progress=[...h.w.document.querySelectorAll('.book-wave-progress')];assert.equal(progress.length,4);assert.ok(progress.every(p=>p.dataset.through===String(base+1000)));const text=hover(h,1);assert.match(text,/盘口：已观测/);assert.match(text,/成交资料待同步/);assert.doesNotMatch(text,/此时未观测/);assert.match(text,/累计成交：资料待同步/);assert.match(text,/净委托累计：—/);assert.doesNotMatch(text,/净委托累计截至已完成区间/);assert.match(hover(h,2),/尚未到达该时刻/);
+ const h=await harness();try{await h.capture('depth',1);assert.equal(h.w.__bookWaveData.version,14);assert.equal(h.w.__bookWaveData.observed_until,base+1000);const progress=[...h.w.document.querySelectorAll('.book-wave-progress')];assert.equal(progress.length,4);assert.ok(progress.every(p=>p.dataset.through===String(base+1000)));const text=hover(h,1);assert.match(text,/盘口：已观测/);assert.match(text,/成交资料待同步/);assert.doesNotMatch(text,/此时未观测/);assert.match(text,/累计成交：资料待同步/);assert.match(text,/净委托累计：—/);assert.doesNotMatch(text,/净委托累计截至已完成区间/);assert.match(hover(h,2),/尚未到达该时刻/);
  }finally{h.close();}
 });
 test('空响应已覆盖但本分钟无成交：绘制共同时间基准而不编造交易所零成交',async()=>{
@@ -63,7 +63,7 @@ test('实际成交分钟hover按指针而非最近窗口终点，并且不使用
  }finally{h.close();}
 });
 test('主指标和图名移除估计估算，仍有推算限制说明与JSON依据',async()=>{
- const h=await harness();try{const names=[...h.w.document.querySelectorAll('.book-side-fields dt,.book-comparison-title,.book-wave-name,#bookSideBid .book-side-primary,#bookSideAsk .book-side-primary')].map(e=>e.textContent);assert.ok(names.length>10);assert.ok(names.every(s=>!s.includes('估计')&&!s.includes('估算')),JSON.stringify(names));assert.match(h.w.document.body.textContent,/不保证真实主动方已恢复/);
- await h.capture('depth',1);await h.capture('ticks',2,{records:[{time:(base+500)/1000,price:10.01,volume:100}]});await h.api.bookRecorder.exportData('json');const r=JSON.parse(h.w.__export.text);assert.equal(r.schema_version,13);assert.equal(r.statistics.trade_decisions[0].fusion_status,'quote_only');assert.match(r.calculation.direction_limitation,/do not establish/);
+ const h=await harness();try{const names=[...h.w.document.querySelectorAll('.book-side-fields dt,.book-comparison-title,.book-wave-name,#bookSideBid .book-side-primary,#bookSideAsk .book-side-primary')].map(e=>e.textContent);assert.ok(names.length>10);assert.ok(names.every(s=>!s.includes('估计')&&!s.includes('估算')),JSON.stringify(names));assert.match(h.w.document.body.textContent,/不能保证未观察过程的真实主动方100%还原/);
+ await h.capture('depth',1);await h.capture('ticks',2,{records:[{time:(base+500)/1000,price:10.01,volume:100}]});await h.api.bookRecorder.exportData('json');const r=JSON.parse(h.w.__export.text);assert.equal(r.schema_version,14);assert.equal(r.statistics.trade_decisions[0].fusion_status,'quote_only');assert.match(r.calculation.direction_limitation,/do not establish/);
  }finally{h.close();}
 });

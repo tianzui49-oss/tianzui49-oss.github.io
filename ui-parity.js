@@ -592,7 +592,7 @@
     const at = byId('bookFlowAt'), volume = byId('bookFlowVolume');
     const instant = byId('bookFlowInstant'), coverage = byId('bookFlowCoverage'), unknown = byId('bookFlowUnknown');
     flow.removeAttribute('style'); flow.className = 'book-comparison';
-    flow.replaceChildren(make('h2', 'book-comparison-title', '相邻五档净委托 · v13'), at, volume, metricsGrid, unknown, instant, coverage, buildBookWaves());
+    flow.replaceChildren(make('h2', 'book-comparison-title', '相邻五档净委托 · v14'), at, volume, metricsGrid, unknown, instant, coverage, buildBookWaves());
 
     const records = make('section', 'card');
     records.id = 'bookRecordsPanel';
